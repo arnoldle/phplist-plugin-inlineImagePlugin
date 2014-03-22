@@ -28,15 +28,18 @@ class inlineImagePlugin extends phplistPlugin
     public $enabled = false;
     public $authors = 'Arnold Lesikar';
     public $description = 'Allows the use of inline images in messages';
-    private $struct =array (
-    		'inline_image' => array(
+    public $DBstruct =array (	//For creation of the required tables by Phplist
+    		'image' => array(
     			"id" => array("integer not null primary key auto_increment","Image numerical ID"),
+    			'owner' => array("integer not null", "ID of user who uploaded the image"),
+    			'local_name' => array("varchar(255) not null","A unique local file name including extension"),
 				"file_name" => array("varchar(255) not null","File name including extension"),
 				"short_name" => array("varchar(255)", "Convenient name for image assigned by user"),
 				"description" => array("Text","Description to be used in text message or in alt attribute"),
+				"type" => array("char(50)", "MIME type of the image"),
 				"cid" => array("char(32) not null","MIME content ID")
 			),
-			'msg_image' => array(
+			'msg' => array(
 				"id" => array("integer not null", "Message ID"),
 				"placeholder" => array("Text", "The placeholder to be used in a search of the message."),
 				"texttag" => array("Text", "Replacement for the placeholder in text messages"),
@@ -46,27 +49,40 @@ class inlineImagePlugin extends phplistPlugin
 				"file_name" => array("varchar(255) not null","File name including extension")
 			)
 		);  				// Structure of database tables for this plugin
+	public $tables = array ('image', 'msg');	// Table names are prefixed by Phplist
     private $cache;			// Keep inline image info while the queue is being processed
     private $curid;			// ID of the current message being processed
-    private $image_types;
+    public $image_types = array(
+                  'gif'  => 'image/gif',
+                  'jpg'  => 'image/jpeg',
+                  'jpeg'  => 'image/jpeg',
+                  'jpe'  => 'image/jpeg',
+                  'bmp'  => 'image/bmp',
+                  'png'  => 'image/png',
+                  'tif'  => 'image/tiff',
+                  'tiff'  => 'image/tiff'
+            );
     
-	public function __construct()
+    public $topMenuLinks = array(
+    			'ldaimages' => array('category' => 'campaigns')
+    			); 
+  	public $pageTitles = array('ldaimages' => 'Add, List, Delete Inline Images');
+
+     
+    function adminmenu() {
+    	return array ("ldaimages" => "List, Add, or Delete Images");
+  	}
+  	
+  	function cleanFormString($str) {
+		return strip_tags(htmlentities(trim($str)));
+	}
+
+	function __construct()
     {
-    	foreach ($this->struct as $key => $val) {
-			$tblname = $GLOBALS["table_prefix"] . $key;
-			if (!Sql_Table_exists($tblname))
-				Sql_create_Table ($tblname, $val);
-		}
-			
-		// We want the image types listed in the PHPlistmailer class
+    	// We want the image types listed in the PHPlistmailer class
 		// We can get this list only by instantiating the class temporarily
 		
-		$temp = new PHPlistMailer();
-		$this->image_types = $temp->image_types;
-		unset($temp);
-		unset($this->image_types['swf']); 	// Don't allow flash files as inline attachments
-			
-        $this->coderoot = dirname(__FILE__) . '/inlineImagePlugin/';
+		$this->coderoot = dirname(__FILE__) . '/inlineImagePlugin/';
             	
 		parent::__construct();
     }
@@ -89,7 +105,7 @@ class inlineImagePlugin extends phplistPlugin
     	}
     	return ($sought=='');
     }
-    
+/***** Use the global tables[] for the table name in database access below ***********/    
     // The value of an attribute in an inline image placeholder
     // $str is the argument searched for the attribute
     // $att is the name of the attribute whose we are seeking
@@ -115,13 +131,11 @@ class inlineImagePlugin extends phplistPlugin
 		else
 			return $match[0];
 	}
-	
-	// Returns the file extension contained in the file name $fn
-	private function getExtension ($fn) {
-		if (strpos($fn, '.') === FALSE)
-			return '';
-		$parts = array_reverse(explode('.', $fn));
-		return $parts[0];
+		
+	private function deleteImage($id) {
+		$tblname = $GLOBALS['table_prefix'] . 'inline_image';
+		$query = sprintf ("delete from %s where id = %d", $tblname, $id);
+		Sql_Query($query);
 	}
     
 	/* allowMessageToBeQueued
@@ -160,7 +174,7 @@ class inlineImagePlugin extends phplistPlugin
     				return "Ambiguous image specification in $val";
     			$row = Sql_Fetch_Row($res);
     			$xtn = $this->getExtension($row[0]);
-    			if (!array_key_exists($xtn, $this->image_types))
+    			if (!array_key_exists($xtn, $this->image_types))  // Should try to use finfo to verify file is an image!
     				return "Invalid file extension for image in $val";
     		}
     	}
@@ -172,8 +186,7 @@ class inlineImagePlugin extends phplistPlugin
 	* @param integer id message id
 	* @return null
 	*
-	* This is where we find and store the data necessary for insertion and attachment
-	* of the inline images in the message.
+	* This is where we queue the inline images associated with the message.
 	*/
 
 	function messageQueued($id) {
@@ -276,7 +289,7 @@ class inlineImagePlugin extends phplistPlugin
    	* @return array (headeritem => headervalue)
    	*/
   	function messageHeaders($mail) {
-  		foreach ($this->cache[$messageid] as $val) {
+  		foreach ($this->cache[$this->curid] as $val) {
   		
   			// Borrowed from the add_html_image() method of the PHPlistMailer class
   			if (method_exists($mail,'AddEmbeddedImageString')) {
