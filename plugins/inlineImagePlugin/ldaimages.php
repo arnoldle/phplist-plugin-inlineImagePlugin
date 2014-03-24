@@ -48,13 +48,27 @@ if (isset($_POST['search']) || (isset($_POST['save']) && isset($_POST['needle'])
 if (isset($_POST['save']) && isset($_FILES) && is_array($_FILES) && (sizeof($_FILES) > 0) && ($_FILES['inlineimage']['size'] > 0)) {
 	if (!$_FILES['error']) {
 		$type = strtolower(trim($_FILES['inlineimage']['type']));
+		$typeErr = "Only an image file can be uploaded here! Please choose a different file.";
+		$tmpfile = $_FILES['inlineimage']['tmp_name'];
 		$filename = $_FILES['inlineimage']['name'];
 		$is_image = in_array($type, $iip->image_types);
 		if (!$is_image)
-			Warn("Only an image file can be uploaded here! Please choose a different file.");
-		else {
-			$tmpfile = $_FILES['inlineimage']['tmp_name'];
-        	$owner = $_SESSION['logindetails']['id'];
+			Warn($typeErr);
+		if (class_exists('finfo')) {
+			$info = new finfo(FILEINFO_MIME);
+			$tempary = explode(';', $info->file($tmpfile));
+			$type = $tempary[0];
+			$is_image = in_array($type, $iip->image_types);
+			if (!$is_image)
+				Warn($typeErr);
+		} elseif (function_exists('mime_content_type')) {
+			$type = mime_content_type ($tmpfile);
+			$is_image = in_array($type, $iip->image_types);
+			if (!$is_image)
+				Warn($typeErr);
+			}
+		if ($is_image) {
+			$owner = $_SESSION['logindetails']['id'];
 			$shortname = $iip->cleanFormString($_REQUEST['shortname']);
     		$desc = $iip->cleanFormString($_REQUEST['image_description']);
     		$fparts = pathinfo($filename);
@@ -98,7 +112,7 @@ if (isset($_POST['save']) && isset($_FILES) && is_array($_FILES) && (sizeof($_FI
 		Warn ("Upload failed!");
 }
 
-// Get ready to display file upload form
+// Create the file upload form
 $enctype = 'enctype="multipart/form-data"';
 print formStart($enctype . ' name="inlineimageform" class="inlineimageplugin" id="inlineimageform" ');
 
@@ -108,7 +122,7 @@ $mypanel .= sprintf ('<div><strong>%s:</strong><br /></div> <div><input name="im
 
 $mypanel .= sprintf  ('<div><strong>%s</strong><br /></div><div><input type="file" name="inlineimage"/>&nbsp;&nbsp;<input class="submit" type="submit" name="save" value="%s"/></div><br />','Image File','Upload File');
 
-// Set up for search
+// Create the search form
 $searchform = sprintf ('<div><strong>%s:</strong><br /></div> <div><input name="needle" id="needle" size="50" maxlength="255"></div>','Enter Image ID, File Name, or Short Name');
 $searchform .= '<input class="submit" type="submit" name="search" value="Search" />';
 $searchpanel = new UIPanel("Search for Image", $searchform);
@@ -117,44 +131,65 @@ $sform = $searchpanel->display();
 /* Prepare to list the image files */
 $mylist = new WebblerListing("ID");
 $qstr = "select id, ";
+$cstr = "select count(*) from %s ";
 if (!$needle) {  	// Get all the appropriate files
-	if (isSuperUser())
+	if (isSuperUser()) 
 		$qstr .= "owner, ";	// Only the superuser gets to see everyone's files
 	$qstr .= "file_name, short_name, description from %s ";
 	if (!isSuperUser()) {
 		$qstr .= "where owner = %d order by id";
+		$cstr .= "where owner = %d";
 		$query = sprintf($qstr, $imgtbl, $currentUser);
+		$cquery = sprintf($cstr, $imgtbl, $currentUser);
 	} else {
 		$qstr .= "order by id";
 		$query = sprintf($qstr, $imgtbl);
-	}
+		$cquery = sprintf($cstr, $imgtbl);
+		}
 } else {	// Get the files found in the search
 	if (isSuperUser())
 		$qstr .= "owner, ";
 	$qstr .= "file_name, short_name, description from %s ";
 	if (is_numeric($needle)) {
-		$qstr .= "where id = %d";
+		$temp = "where id = %d";
+		$qstr .= $temp;
+		$cstr .= $temp;
 		if (!isSuperUser()) {
-			$qstr .=" and owner = %d";
+			$temp =" and owner = %d";
+			$qstr .= $temp;
+			$cstr .= $temp;
 			$query = sprintf($qstr, $imgtbl, $needle, $curuser);
+			$cquery = sprintf($cstr, $imgtbl, $needle, $curuser);
 		} else {
 			$query = sprintf($qstr, $imgtbl, $needle);
+			$cquery = sprintf($cstr, $imgtbl, $needle);
 		}
 	} else {
-		$qstr .= "where (file_name='%s' or short_name='%s')";
+		$temp = "where (file_name='%s' or short_name='%s')";
+		$qstr .= $temp;
+		$cstr .= $temp;
 		if (!isSuperUser()) {
-			$qstr .=" and owner = %d order by id";
+			$temp = " and owner = %d order by id";
+			$qstr .= $temp;
+			$cstr .= $temp;
 			$query = sprintf($qstr, $imgtbl, $needle, $needle, $curuser);
+			$cquery = sprintf($cstr, $imgtbl, $needle, $needle, $curuser);
 		} else {
 			$qstr .= " order by id";
 			$query = sprintf($qstr, $imgtbl, $needle, $needle);
+			$cquery = sprintf($cstr, $imgtbl, $needle, $needle);
 		}
 	}
 }
 
 /* List the image files */
+$temp = Sql_Fetch_Row_Query($cquery);
+$total = $temp[0];
+if ($start >= $total)
+	$start = $total - $iip->numberPerList;
+$query .= ' limit ' . $start . ',' . $iip->numberPerList;
 $dbresult = Sql_Query($query);
-$total = Sql_Num_Rows($dbresult);
+
 if (!$total)
 	if (isset($_POST['needle']))
 		$mylist->addElement('<strong>No images found</strong>', '');
@@ -175,7 +210,7 @@ else {
 		$mylist->addColumn($pid, 'Description', $desc);
 		$mydel = sprintf('<a href="javascript:deleteRec(\'%s\');" class="del">del</a>',"./?page=" . $ourpage . "&pi=" . $ourname . "&delete=" . $pid);
 		$mylist->addColumn($pid, '', $mydel);
-		$paging=simplePaging("ldaimages", $start, $total,10,'Images');
+		$paging=simplePaging("ldaimages", $start, $total, $iip->numberPerList,'Images');
 		$mylist->usePanel($paging);
 	}
 }
