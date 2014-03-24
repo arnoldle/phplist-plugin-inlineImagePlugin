@@ -66,11 +66,11 @@ class inlineImagePlugin extends phplistPlugin
     public $topMenuLinks = array(
     			'ldaimages' => array('category' => 'campaigns')
     			); 
-  	public $pageTitles = array('ldaimages' => 'Add, List, Delete Inline Images');
+  	public $pageTitles = array('ldaimages' => 'Manage Inline Images');
 
      
     function adminmenu() {
-    	return array ("ldaimages" => "List, Add, or Delete Images");
+    	return array ("ldaimages" => "Manage Inline Images");
   	}
   	
   	function cleanFormString($str) {
