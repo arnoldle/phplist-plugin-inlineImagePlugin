@@ -7,7 +7,7 @@ if (isset($_GET["start"])){
 }
 else $start = 0;
 
-if (isset($_POST['save']) || isset($_POST['search'])) {  	// We do deletion with a GET, so can't verify token then.
+if (isset($_POST['save']) || isset($_POST['search']) || isset($_POST['update'])){  	// We do deletion with a GET, so can't verify token then.
 
    /* check the XSRF token */
    if (!verifyToken()) {
@@ -37,6 +37,16 @@ if (isset($_GET['delete'])) {
 		Sql_Query($query);
 	} else
 		Warn ('Cannot delete image id = ', $delid); 
+}
+
+//[shortname] => mrchair [extension] => jpg [filename] => hinojosa [image_description] => The new Dem state chairman
+// Handle image update
+if (isset($_POST['update'])) {
+	$fn = $iip->cleanFormString($_POST['filename']) . '.' . $iip->cleanFormString($_POST['extension']);
+	$query = sprintf("update %s set file_name='%s', short_name='%s', description='%s' where id=%d", $imgtbl, $fn, $iip->cleanFormString($_POST['shortname']),$iip->cleanFormString($_POST['image_description']), $_POST['imageid']);
+	if (!Sql_query($query))
+		Warn(sprintf("Update of information for image %d failed!", $_POST['imageid']));
+
 }
 
 // Initialize seartch

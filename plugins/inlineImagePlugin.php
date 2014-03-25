@@ -50,6 +50,8 @@ class inlineImagePlugin extends phplistPlugin
 			)
 		);  				// Structure of database tables for this plugin
 	public $tables = array ('image', 'msg');	// Table names are prefixed by Phplist
+	public $numberPerList = 10;		// Number of images to be listed at once in table
+	private $processing_queue = false;
     private $cache;			// Keep inline image info while the queue is being processed
     private $curid;			// ID of the current message being processed
     public $image_types = array(
@@ -76,12 +78,18 @@ class inlineImagePlugin extends phplistPlugin
   	function cleanFormString($str) {
 		return strip_tags(htmlentities(trim($str)));
 	}
+	
+	function myFormStart($action, $additional) {
+		$html = formStart($additional);
+		preg_match('/action\s*=\s*".*"/Ui', $html, $match);
+		$html = str_replace($match[0], 'action="' . $action .'"', $html);
+		return $html;
+	}
 
 	function __construct()
     {
-    	// We want the image types listed in the PHPlistmailer class
-		// We can get this list only by instantiating the class temporarily
-		
+    	$this->processing_queue = false;
+    	
 		$this->coderoot = dirname(__FILE__) . '/inlineImagePlugin/';
             	
 		parent::__construct();
@@ -105,7 +113,7 @@ class inlineImagePlugin extends phplistPlugin
     	}
     	return ($sought=='');
     }
-/***** Use the global tables[] for the table name in database access below ***********/    
+   
     // The value of an attribute in an inline image placeholder
     // $str is the argument searched for the attribute
     // $att is the name of the attribute whose we are seeking
@@ -279,6 +287,23 @@ class inlineImagePlugin extends phplistPlugin
   			$content = str_replace($val['placeholder'], $val['imagetag'], $content);
   		return $content;
   	}
+  	
+  	 /* processQueueStart
+   	* called at the beginning of processQueue, after the process was locked
+   	* @param none
+   	* @return null
+   	*/
+  	function processQueueStart() {
+  		$this->processing_queue = true;
+  	}
+  	
+  	/* messageQueueFinished
+   	* called when a sending of the queue has finished
+   	* @return null
+   	*/
+  	function messageQueueFinished() {
+  		$this->processing_queue = false;
+  	}
 
 	/**
    	* messageHeaders
@@ -289,6 +314,10 @@ class inlineImagePlugin extends phplistPlugin
    	* @return array (headeritem => headervalue)
    	*/
   	function messageHeaders($mail) {
+  	
+  		if (!$this->processing_queue)	// Administrative message?
+  			return;
+  			
   		foreach ($this->cache[$this->curid] as $val) {
   		
   			// Borrowed from the add_html_image() method of the PHPlistMailer class
