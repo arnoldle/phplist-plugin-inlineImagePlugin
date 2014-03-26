@@ -91,29 +91,14 @@ class inlineImagePlugin extends phplistPlugin
     	$this->processing_queue = false;
     	
 		$this->coderoot = dirname(__FILE__) . '/inlineImagePlugin/';
+		
+		$imagedir = $this->coderoot . "images";
+		if (!is_dir($imagedir))
+			mkdir ($imagedir);
             	
 		parent::__construct();
     }
     
-    // Check that quotes around attributes balance
-    private function checkQuotes ($str)
-    {
-    	preg_match_all ("/\"|'/", $str, $match);
-    	$quotes = $match[0];
-    	$n = count($quotes);
-    	$sought="";
-    	$ptr = 0;
-    	while ($ptr < $n) {
-    		if ($sought != "") {
-    			if ($quotes[$ptr] == $sought) 
-    				$sought = "";   		
-    		} else
-    			$sought = $quotes[$ptr];
-    		$ptr++;		
-    	}
-    	return ($sought=='');
-    }
-   
     // The value of an attribute in an inline image placeholder
     // $str is the argument searched for the attribute
     // $att is the name of the attribute whose we are seeking
@@ -139,13 +124,7 @@ class inlineImagePlugin extends phplistPlugin
 		else
 			return $match[0];
 	}
-		
-	private function deleteImage($id) {
-		$tblname = $GLOBALS['table_prefix'] . 'inline_image';
-		$query = sprintf ("delete from %s where id = %d", $tblname, $id);
-		Sql_Query($query);
-	}
-    
+
 	/* allowMessageToBeQueued
 	* called to verify that the message can be added to the queue
 	* @param array messagedata - associative array with all data for campaign
@@ -154,36 +133,48 @@ class inlineImagePlugin extends phplistPlugin
 	function allowMessageToBeQueued($messagedata = array()) 
 	{
 		$msg = $messagedata['message'];
+		$owner = $_SESSION['logindetails']['id'];
+		
 		if (strpos($msg, '[IMAGE') === FALSE)  // If no image, nothing to do
     		return '';
     	
     	// Check that the brackets are closed for the inline image placeholders
-    	preg_match_all('/\[IMAGE/U', $msg, $match1);
-    	preg_match_all('/\[IMAGE[^\]]+\]/U', $msg, $match2);
+    	preg_match_all('/\[IMAGE/', $msg, $match1);
+    	preg_match_all('/\[IMAGE[^\]]+\]/', $msg, $match2);
     	if (count($match1[0]) != count($match2[0]))
     		return 'Brackets are not closed for an inline image placeholder.';
     	
-    	// Check that we have the image in the database
-    	$tblname = $GLOBALS['table_prefix'] . 'inline_image';
-    	foreach ($match2[0] as $val) {
-    		if (!$this->checkQuotes($val))
-    			return "Unbalanced quotes in $val";
-    		$src = $this->getAttribute($val, 'src');
+    	$tblname = $GLOBALS['tables']['inlineImagePlugin_image'];
+    	foreach ($match2[0] as $val0) {
+    		/* The editor encode HTML special characters. We must decode them
+    		for searching with a regex. Also some spaces become '&nbsp; */
+    		$val = htmlspecialchars_decode($val0, ENT_QUOTES | ENT_HTML401);
+    		$val = str_replace('&nbsp;', ' ', $val);
+    		
+    		if (preg_match('/\(|\)/', $val) === false)	// If no parens, it's not our placeholder
+    			continue;
+    		
+    		if ((!preg_match('/\[IMAGE!?\s*\(/', $val)) || (!preg_match('/\)\s*\]/', $val)) || 
+    			(substr_count($val, '(') > 1) || (substr_count($val, ')') > 1))
+    			return "$val0 is a badly formed placeholder."; 
+    		
+    		preg_match('/\(\s*((\d|\w|_|\.)+)\s*(\)|\|)/', $val, $match);
+    		$src = $match[1];
     		if (is_numeric($src)) {
     			$query = sprintf("Select cid from %s where id=%d", $tblname, $src); 
-    			if (!Sql_Query($query))
-    				return "Unknown image in $val";   			
+    			if (!isSuperUser())
+    				$query .= sprintf(" and owner = '%s'", $owner);
+    			if (!Sql_Fetch_Row_Query($query))
+    				return "Unknown image in $val0";
     		} else {
-    			$query = sprintf("Select file_name from %s where file_name=%s or short_name=%s" , $tblname, $src, $src);
-    			$res = Sql_Query($query);
-    			if (!$res)
-    				return "Unknown image in $val";
-    			if (Sql_Num_Rows($res) > 1)
-    				return "Ambiguous image specification in $val";
-    			$row = Sql_Fetch_Row($res);
-    			$xtn = $this->getExtension($row[0]);
-    			if (!array_key_exists($xtn, $this->image_types))  // Should try to use finfo to verify file is an image!
-    				return "Invalid file extension for image in $val";
+    			$query = sprintf("Select count(*) from %s where file_name='%s' or short_name='%s'" , $tblname, $src, $src);
+    			if (!isSuperUser())
+    				$query .= sprintf(" and owner = '%s'", $owner);
+    			$row = Sql_Fetch_Row_Query($query);
+    			if (!$row[0])
+    				return "Unknown image in $val0";
+    			if ($row[0] > 1)
+    				return "Ambiguous image specification in $val0";
     		}
     	}
     	return '';
@@ -198,42 +189,50 @@ class inlineImagePlugin extends phplistPlugin
 	*/
 
 	function messageQueued($id) {
-		$imagetbl = $GLOBALS['table_prefix'] . 'inline_image';
-		$msgtbl = $GLOBALS['table_prefix'] . 'msg_image';
+		$imagetbl = $GLOBALS['tables']['inlineImagePlugin_image'];
+		$msgtbl = $GLOBALS['tables']['inlineImagePlugin_msg'];
 		$msgdata = loadMessageData($id);
-		preg_match_all('/\[IMAGE[^\]]+\]/U', $msg, $match);
+		preg_match_all('/\[IMAGE[^\]]+\]/U', $msgdata['message'], $match);
 		
 		// Store the message id, the notext flag, the form of the placeholder,
 		// the attribute string, and the cid for each image in the message 
-		foreach ($match[0] as $val) {
-			$alt = $this->getAttribute($val, 'alt');
-			$src = $this->getAttribute($val, 'src');
+		foreach ($match[0] as $val0) {
+			/* The editor encode HTML special characters. We must decode them
+    		for searching with a regex. Also some spaces become '&nbsp; */
+    		$val = htmlspecialchars_decode($val0, ENT_QUOTES | ENT_HTML401);
+    		$val = str_replace('&nbsp;', ' ', $val);
+    		
+    		if (preg_match('/\(|\)/', $val) === false)	// If no parens, it's not our placeholder
+    			continue;
+    		
+    		preg_match('/\(\s*((\d|\w|_|\.)+)\s*(\)|\|)/', $val, $match);
+    		$src = $match[1];
     		if (is_numeric($src)) 
-    			$query = sprintf("Select cid, description, file_name from %s where id=%d", $imagetbl, $src);  			
+    			$query = sprintf("Select cid, description, file_name, type from %s where id=%d", $imagetbl, $src);  			
     		else
-    			$query = sprintf("Select cid, description, file_name from %s where file_name=%s or short_name=%s" , $tblname, $src, $src);
+    			$query = sprintf("Select cid, description, file_name, type from %s where file_name='%s' or short_name='%s'" , $imagetbl, $src, $src);
     		$row = Sql_Fetch_Row_Query($query);
     		$cid = $row[0];
     		$desc = $row[1];
     		$fn = $row[2];
-    		$imgtyp = $this->image_types[$this->getExtension($fn)];
-    		if (strpos($val, 'NOTEXT') != FALSE) {
+    		$imgtype = $row[3];
+    		if (strpos($val, '[IMAGE!') === FALSE) {	// '!' afterIMAGE flags no text replacement
     			$txt = '[IMAGE: ';
+    			$alt = $this->getAttribute($val, 'alt');
 				if ($alt != '')
 					$txt .= $alt .']';
 				else
 					$txt .= $desc .']';			
     		} else
     			$txt = '';
-    		$attstr = str_replace('[IMAGE ', '', $val);
-    		$attstr = str_replace('NOTEXT ', '', $attstr);
-    		$attstr = trim(substr($attstr, 0, -1));
-    		$attstr = trim(str_replace($this->getAttribute($attstr, 'src', 0), '', $attstr)); 
+    		
+    		$attstr = preg_match('/\|(.*)\)/U', $val, $match)? trim($match[1]) : '';
 			$imgtag ='<img src="cid:' . $cid . '"';
 			if ($alt = '')
 				$imgtag .= ' alt="' . $desc . '"';
-			$imgtag .= ' ' . $attstr . '>';	
-    		$query = sprintf("insert into %s values (%d, %s, %s, %s, %s, %s, %s)", $msgtbl, $id, $val, $txt, $imgtag, $cid, $imgtyp, $fn);
+			$imgtag .= ' ' . trim($attstr) . '>';	
+    		$query = sprintf("insert into %s values (%d, '%s', '%s', '%s', '%s', '%s', '%s')", $msgtbl, $id, sql_escape($val0), 
+    			sql_escape($txt), sql_escape($imgtag), sql_escape($cid), sql_escape($imgtype), sql_escape($fn));
     		Sql_Query($query);
     	}
   	} 
