@@ -4,11 +4,29 @@ if (!defined('PHPLISTINIT')) die(); ## avoid pages being loaded directly
 
 $imgtbl = $GLOBALS['tables']['inlineImagePlugin_image'];
 $editid = $_GET['eid'];
-$query = sprintf('select file_name, short_name, description from %s where id=%d', $imgtbl, $editid);
+$query = sprintf('select file_name, short_name, description, local_name, width, height from %s where imgid=%d', $imgtbl, $editid);
 $row = Sql_Fetch_Assoc_Query($query);
+
+$wid = $row['width'];
+$hgt = $row['height'];
+
+if (($wid > 600) || ($hgt > 200)) {
+	$factor = 600/$wid;
+	$trial = 200/$hgt;
+	$factor = ($trial < $factor? $trial: $factor);
+	$widd = round($factor * $wid);
+	$hgtd = round($factor * $hgt);
+} else {
+	$widd = $wid;
+	$hgtd = $hgt;
+}
+
+$fn = 'plugins/inlineImagePlugin/images/'. basename($row['local_name']);
 
 $iip = $GLOBALS['plugins']['inlineImagePlugin'];
 
+print("<img src=\"$fn\" width=\"$widd\" height=\"$hgtd\" style=\"display: block; margin:0px auto 20px auto; border: 4px solid gray; padding:5px; background-color:Silver; \">");
+print("<p style=\"text-align:center; font-size:16px\"><strong>Width: $wid&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Height: $hgt</strong></p>");
 print ($iip->myFormStart(PageURL2('ldaimages'), 'name="inlineimageEdit" class="inlineimageplugin" id="inlineimageEdit"'));
 
 $mypanel = '';
@@ -27,6 +45,6 @@ $mypanel .= sprintf ('<div><strong>%s:</strong><br /></div> <div><textarea name=
 
 $mypanel .= sprintf('<div><input class="submit" onclick="window.location.href=\'%s\'" type="button" name="cancel" value="%s">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<input class="submit" type="submit" name="update" value="%s"/></div><br />',PageURL2('ldaimages'), 'Cancel','Save');
 
-$panel = new UIPanel("Edit Properties of Image" . $editid, $mypanel);
+$panel = new UIPanel("Edit Properties of Image " . $editid, $mypanel);
 print($panel->display());
 print '</form>';

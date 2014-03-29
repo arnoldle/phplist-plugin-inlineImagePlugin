@@ -28,22 +28,22 @@ $needle = '';
 // Handle image deletion
 if (isset($_GET['delete'])) {
 	$delid = $_GET['delete'];
-	$query = sprintf("select local_name from %s where id=%d", $imgtbl, $delid);
+	$query = sprintf("select local_name from %s where imgid=%d", $imgtbl, $delid);
 	$row = Sql_Fetch_Assoc_Query($query);
 	if ($row) {
 		$thefile = $row['local_name'];
 		unlink ($thefile); 	// Delete file from directory as well as database
-		$query = sprintf("delete from %s where id=%d", $imgtbl, $delid);
+		$query = sprintf("delete from %s where imgid=%d", $imgtbl, $delid);
 		Sql_Query($query);
 	} else
 		Warn ('Cannot delete image id = ', $delid); 
 }
 
-//[shortname] => mrchair [extension] => jpg [filename] => hinojosa [image_description] => The new Dem state chairman
 // Handle image update
 if (isset($_POST['update'])) {
 	$fn = $iip->cleanFormString($_POST['filename']) . '.' . $iip->cleanFormString($_POST['extension']);
-	$query = sprintf("update %s set file_name='%s', short_name='%s', description='%s' where id=%d", $imgtbl, $fn, $iip->cleanFormString($_POST['shortname']),$iip->cleanFormString($_POST['image_description']), $_POST['imageid']);
+	$desc = substr($iip->cleanFormString($_POST['image_description']), 0, 255);
+	$query = sprintf("update %s set file_name='%s', short_name='%s', description='%s' where imgid=%d", $imgtbl, $fn, $iip->cleanFormString($_POST['shortname']),$desc, $_POST['imageid']);
 	if (!Sql_query($query))
 		Warn(sprintf("Update of information for image %d failed!", $_POST['imageid']));
 
@@ -140,19 +140,19 @@ $sform = $searchpanel->display();
 
 /* Prepare to list the image files */
 $mylist = new WebblerListing("ID");
-$qstr = "select id, ";
+$qstr = "select imgid, ";
 $cstr = "select count(*) from %s ";
 if (!$needle) {  	// Get all the appropriate files
 	if (isSuperUser()) 
 		$qstr .= "owner, ";	// Only the superuser gets to see everyone's files
 	$qstr .= "file_name, short_name, description from %s ";
 	if (!isSuperUser()) {
-		$qstr .= "where owner = %d order by id";
+		$qstr .= "where owner = %d order by imgid";
 		$cstr .= "where owner = %d";
 		$query = sprintf($qstr, $imgtbl, $currentUser);
 		$cquery = sprintf($cstr, $imgtbl, $currentUser);
 	} else {
-		$qstr .= "order by id";
+		$qstr .= "order by imgid";
 		$query = sprintf($qstr, $imgtbl);
 		$cquery = sprintf($cstr, $imgtbl);
 		}
@@ -161,7 +161,7 @@ if (!$needle) {  	// Get all the appropriate files
 		$qstr .= "owner, ";
 	$qstr .= "file_name, short_name, description from %s ";
 	if (is_numeric($needle)) {
-		$temp = "where id = %d";
+		$temp = "where imgid = %d";
 		$qstr .= $temp;
 		$cstr .= $temp;
 		if (!isSuperUser()) {
@@ -179,13 +179,13 @@ if (!$needle) {  	// Get all the appropriate files
 		$qstr .= $temp;
 		$cstr .= $temp;
 		if (!isSuperUser()) {
-			$temp = " and owner = %d order by id";
+			$temp = " and owner = %d order by imgid";
 			$qstr .= $temp;
 			$cstr .= $temp;
 			$query = sprintf($qstr, $imgtbl, $needle, $needle, $curuser);
 			$cquery = sprintf($cstr, $imgtbl, $needle, $needle, $curuser);
 		} else {
-			$qstr .= " order by id";
+			$qstr .= " order by imgid";
 			$query = sprintf($qstr, $imgtbl, $needle, $needle);
 			$cquery = sprintf($cstr, $imgtbl, $needle, $needle);
 		}
@@ -195,7 +195,7 @@ if (!$needle) {  	// Get all the appropriate files
 /* List the image files */
 $temp = Sql_Fetch_Row_Query($cquery);
 $total = $temp[0];
-if ($start >= $total)
+if (($total) && ($start >= $total))
 	$start = $total - $iip->numberPerList;
 $query .= ' limit ' . $start . ',' . $iip->numberPerList;
 $dbresult = Sql_Query($query);
@@ -207,7 +207,7 @@ if (!$total)
 		$mylist->addElement('<strong>No images are available</strong>', '');
 else {
 	while ($row = Sql_Fetch_Assoc($dbresult)) {
-		$pid = $row['id'];
+		$pid = $row['imgid'];
 		$editurl = PageURL2('edit','','eid=' . $pid);
 		$mylist->addElement($pid, $editurl);
 		if (isSuperUser())
@@ -235,7 +235,10 @@ $list = str_replace($ltitle, $newtitle, $list);
 
 $mypanel .= $sform . '<br />';
 $mypanel .= $list . '<br />';
-//Info('Click on the ID, Short Name, or File Name of an image to edit its properties.<br />Click on the accompanying trash can to delete an image');
+if (!is_dir($imgdir))
+	Warn("Image directory does not exist! CANNOT UPLOAD FILES!");
+else
+	Info('Click on the ID, Short Name, or File Name of an image to edit its properties.<br />Click on the accompanying trash can to delete an image');
 $panel = new UIPanel('Inline Image Files',$mypanel,'');
 print $panel->display();
 print('</form>');

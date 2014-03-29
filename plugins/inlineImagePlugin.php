@@ -30,23 +30,22 @@ class inlineImagePlugin extends phplistPlugin
     public $description = 'Allows the use of inline images in messages';
     public $DBstruct =array (	//For creation of the required tables by Phplist
     		'image' => array(
-    			"id" => array("integer not null primary key auto_increment","Image numerical ID"),
+    			"imgid" => array("integer not null primary key auto_increment","Image numerical ID"),
     			'owner' => array("integer not null", "ID of user who uploaded the image"),
     			'local_name' => array("varchar(255) not null","A unique local file name including extension"),
 				"file_name" => array("varchar(255) not null","File name including extension"),
 				"short_name" => array("varchar(255)", "Convenient name for image assigned by user"),
+				"width" => array("integer not null", "The width of the image"),
+				"height" => array("integer not null", "The height of the image"),
 				"description" => array("Text","Description to be used in text message or in alt attribute"),
 				"type" => array("char(50)", "MIME type of the image"),
 				"cid" => array("char(32) not null","MIME content ID")
 			),
 			'msg' => array(
 				"id" => array("integer not null", "Message ID"),
-				"placeholder" => array("Text", "The placeholder to be used in a search of the message."),
+				"imgid" => array("integer not null","Image numerical ID"),
 				"texttag" => array("Text", "Replacement for the placeholder in text messages"),
-				"imagetag" => array("Text", "HTML image tag with attributes and cid"),
-				"cid" => array("char(32) not null","Content ID of one of the inline images attached to the message"),
-				"image_type" => array("char(50)", "MIME type of the image"),
-				"file_name" => array("varchar(255) not null","File name including extension")
+				"imagetag" => array("Text", "HTML image tag with attributes and cid")
 			)
 		);  				// Structure of database tables for this plugin
 	public $tables = array ('image', 'msg');	// Table names are prefixed by Phplist
@@ -76,7 +75,7 @@ class inlineImagePlugin extends phplistPlugin
   	}
   	
   	function cleanFormString($str) {
-		return strip_tags(htmlentities(trim($str)));
+		return sql_escape(strip_tags(trim($str)));
 	}
 	
 	function myFormStart($action, $additional) {
@@ -154,14 +153,14 @@ class inlineImagePlugin extends phplistPlugin
     		if (preg_match('/\(|\)/', $val) === false)	// If no parens, it's not our placeholder
     			continue;
     		
-    		if ((!preg_match('/\[IMAGE!?\s*\(/', $val)) || (!preg_match('/\)\s*\]/', $val)) || 
+    		if ((!preg_match('/\[IMAGE\s*!?\s*\(/', $val)) || (!preg_match('/\)\s*\]/', $val)) ||
     			(substr_count($val, '(') > 1) || (substr_count($val, ')') > 1))
     			return "$val0 is a badly formed placeholder."; 
     		
-    		preg_match('/\(\s*((\d|\w|_|\.)+)\s*(\)|\|)/', $val, $match);
+    		preg_match('/\(\s*(\S.*\S)\s*(\)|\|)/U', $val, $match);
     		$src = $match[1];
     		if (is_numeric($src)) {
-    			$query = sprintf("Select cid from %s where id=%d", $tblname, $src); 
+    			$query = sprintf("Select cid from %s where imgid=%d", $tblname, $src); 
     			if (!isSuperUser())
     				$query .= sprintf(" and owner = '%s'", $owner);
     			if (!Sql_Fetch_Row_Query($query))
@@ -192,48 +191,47 @@ class inlineImagePlugin extends phplistPlugin
 		$imagetbl = $GLOBALS['tables']['inlineImagePlugin_image'];
 		$msgtbl = $GLOBALS['tables']['inlineImagePlugin_msg'];
 		$msgdata = loadMessageData($id);
-		preg_match_all('/\[IMAGE[^\]]+\]/U', $msgdata['message'], $match);
-		
-		// Store the message id, the notext flag, the form of the placeholder,
-		// the attribute string, and the cid for each image in the message 
-		foreach ($match[0] as $val0) {
+		// In regex below, must account for editor's possible substitution of spaces by &nbsp;
+    	preg_match_all('/\[IMAGE[^\(\)]*\([^\(\)]+\)(\s|&nbsp;)*\]/U', $msgdata['message'], $match); 
+ 	
+		//Store everything needed for rapid processing of messages
+		foreach ($match[0] as $val) {
 			/* The editor encode HTML special characters. We must decode them
     		for searching with a regex. Also some spaces become '&nbsp; */
-    		$val = htmlspecialchars_decode($val0, ENT_QUOTES | ENT_HTML401);
-    		$val = str_replace('&nbsp;', ' ', $val);
+    		$val = htmlspecialchars_decode($val, ENT_QUOTES | ENT_HTML401);
+    		$val = strip_tags($val); 	// The editor may insert tags into our placeholder
+    		$val = str_replace('&nbsp;', ' ', $val);	// The editor seems to transform spaces into &nbsp; randomly
     		
-    		if (preg_match('/\(|\)/', $val) === false)	// If no parens, it's not our placeholder
-    			continue;
-    		
-    		preg_match('/\(\s*((\d|\w|_|\.)+)\s*(\)|\|)/', $val, $match);
+    		preg_match('/\(\s*(\S.*\S)\s*(\)|\|)/U', $val, $match);
     		$src = $match[1];
     		if (is_numeric($src)) 
-    			$query = sprintf("Select cid, description, file_name, type from %s where id=%d", $imagetbl, $src);  			
+    			$query = sprintf("Select imgid, cid, description from %s where imgid=%d", $imagetbl, $src);  			
     		else
-    			$query = sprintf("Select cid, description, file_name, type from %s where file_name='%s' or short_name='%s'" , $imagetbl, $src, $src);
+    			$query = sprintf("Select imgid, cid, description from %s where file_name='%s' or short_name='%s'" , $imagetbl, $src, $src);
     		$row = Sql_Fetch_Row_Query($query);
-    		$cid = $row[0];
-    		$desc = $row[1];
-    		$fn = $row[2];
-    		$imgtype = $row[3];
-    		if (strpos($val, '[IMAGE!') === FALSE) {	// '!' afterIMAGE flags no text replacement
+    		$img = $row[0];
+    		$cid = $row[1];
+    		$desc = $row[2];
+    		if (!preg_match('/\[IMAGE\s*!/', $val)) {	// '!' after [IMAGE flags no text replacement
     			$txt = '[IMAGE: ';
     			$alt = $this->getAttribute($val, 'alt');
 				if ($alt != '')
 					$txt .= $alt .']';
 				else
-					$txt .= $desc .']';			
+					$txt .= $desc .']';
+				$txt = strip_tags(HTML2Text($txt)); //HTML2Text produces wordwrap with <br /> at 70 chars! 			
     		} else
     			$txt = '';
     		
     		$attstr = preg_match('/\|(.*)\)/U', $val, $match)? trim($match[1]) : '';
 			$imgtag ='<img src="cid:' . $cid . '"';
-			if ($alt = '')
+			if ($alt == '')
 				$imgtag .= ' alt="' . $desc . '"';
 			$imgtag .= ' ' . trim($attstr) . '>';	
-    		$query = sprintf("insert into %s values (%d, '%s', '%s', '%s', '%s', '%s', '%s')", $msgtbl, $id, sql_escape($val0), 
-    			sql_escape($txt), sql_escape($imgtag), sql_escape($cid), sql_escape($imgtype), sql_escape($fn));
-    		Sql_Query($query);
+			
+			$query = sprintf("insert into %s values (%d, '%d', '%s', '%s')", $msgtbl, $id, $img,
+    			sql_escape($txt), sql_escape($imgtag));
+			Sql_Query($query);
     	}
   	} 
   	
@@ -248,13 +246,15 @@ class inlineImagePlugin extends phplistPlugin
 
   	function campaignStarted($messagedata = array()) {
   		$this->curid = $messagedata['id'];
-  		$msgtbl = $GLOBALS['table_prefix'] . 'msg_image';
-  		$query = sprintf('select placeholder, texttag, imagetag, cid, image_type, file_name from %s where id = %d', $msgtbl, $this->curid);
+  		$msgtbl = $GLOBALS['tables']['inlineImagePlugin_msg'];
+  		$imgtbl = $GLOBALS['tables']['inlineImagePlugin_image'];
+  		
+		$query = sprintf('select texttag, imagetag, cid, type, file_name, local_name from %s natural join %s where id = %d', $msgtbl, $imgtbl, $this->curid);
   		$result = Sql_Query($query);
   		$i = 0;
-  		while ($row = Sql_Fetch_Array($result)) {
+  		while ($row = Sql_Fetch_Assoc($result)) {
   			$this->cache[$this->curid][$i] = $row;
-  			$this->cache[$this->curid][$i]['contents'] = file_get_contents($this->coderoot . 'images' . $row[5]);
+  			$this->cache[$this->curid][$i]['contents'] = file_get_contents($row['local_name']);
   			$i++;
   		}
   	} 
@@ -268,8 +268,12 @@ class inlineImagePlugin extends phplistPlugin
    	* @return string parsed content
    	*/
   	function parseOutgoingTextMessage($messageid, $content, $destination, $userdata = null) {
-  		foreach ($this->cache[$messageid] as $val) 
-  			$content = str_replace($val['placeholder'], $val['texttag'], $content);
+  		
+  		// In regex below, must account for possible substitution of spaces by &nbsp;
+    	preg_match_all('/\[IMAGE[^\(\)]*\([^\(\)]+\)(\s|&nbsp;)*\]/U', $content, $match); 
+    	for ($i = 0; $i < sizeof($match[0]); $i++) { // And replace them
+  				$content = str_replace($match[0][$i], $this->cache[$messageid][$i]['texttag'], $content);
+  		}
     	return $content;
   	}
 
@@ -282,10 +286,14 @@ class inlineImagePlugin extends phplistPlugin
    	* @return string parsed content
    	*/
   	function parseOutgoingHTMLMessage($messageid, $content, $destination, $userdata = null) {
-    	foreach ($this->cache[$messageid] as $val) 
-  			$content = str_replace($val['placeholder'], $val['imagetag'], $content);
-  		return $content;
-  	}
+  		
+  		// In regex below, must account for possible substitution of spaces by &nbsp;
+    	preg_match_all('/\[IMAGE[^\(\)]*\([^\(\)]+\)(\s|&nbsp;)*\]/U', $content, $match); 
+    	for ($i = 0; $i < sizeof($match[0]); $i++) { // And replace them
+  				$content = str_replace($match[0][$i], $this->cache[$messageid][$i]['imagetag'], $content);
+  		}
+    	return $content;
+    }
   	
   	 /* processQueueStart
    	* called at the beginning of processQueue, after the process was locked
@@ -316,32 +324,34 @@ class inlineImagePlugin extends phplistPlugin
   	
   		if (!$this->processing_queue)	// Administrative message?
   			return;
-  			
-  		foreach ($this->cache[$this->curid] as $val) {
   		
+  		$imgs = $this->cache[$this->curid];
+  		for($i=0; $i< sizeof($imgs); $i++) {
+  		
+printf("%s, %s, %s, %s\n", $imgs[$i]['cid'], $imgs[$i]['file_name'], $mail->encoding, $imgs[$i]['image_type']);
   			// Borrowed from the add_html_image() method of the PHPlistMailer class
   			if (method_exists($mail,'AddEmbeddedImageString')) {
-        		$mail->AddEmbeddedImageString($val['contents'], $val['cid'], $val['file_name'], $mail->encoding, $val['image_type']);
+        		$mail->AddEmbeddedImageString($imgs[$i]['contents'], $imgs[$i]['cid'], $imgs[$i]['file_name'], $mail->encoding, $imgs[$i]['image_type']);
       		} elseif (method_exists($mail,'AddStringEmbeddedImage')) {
         	## PHPMailer 5.2.5 and up renamed the method
         	## https://github.com/Synchro/PHPMailer/issues/42#issuecomment-16217354
-        		$mail->AddStringEmbeddedImage($val['contents'], $val['cid'], $val['file_name'], $mail->encoding, $val['image_type']);
+        		$mail->AddStringEmbeddedImage($imgs[$i]['contents'], $imgs[$i]['cid'], $imgs[$i]['file_name'], $mail->encoding, $imgs[$i]['image_type']);
       		} elseif (isset($mail->attachment) && is_array($mail->attachment)) {
         	// Append to $attachment array
         		$cur = count($mail->attachment);
-        		$mail->attachment[$cur][0] = $val['contents'];
-        		$mail->attachment[$cur][1] = $val['file_name'];
-        		$mail->attachment[$cur][2] = $val['file_name'];
+        		$mail->attachment[$cur][0] = $imgs[$i]['contents'];
+        		$mail->attachment[$cur][1] = $imgs[$i]['file_name'];
+        		$mail->attachment[$cur][2] = $imgs[$i]['file_name'];
         		$mail->attachment[$cur][3] = 'base64';
-        		$mail->attachment[$cur][4] = $val['image_type'];
+        		$mail->attachment[$cur][4] = $imgs[$i]['image_type'];
         		$mail->attachment[$cur][5] = true; // isStringAttachment
         		$mail->attachment[$cur][6] = "inline";
-        		$mail->attachment[$cur][7] = $val['cid'];
+        		$mail->attachment[$cur][7] = $imgs[$i]['cid'];
       		} else {
         		logEvent("phpMailer needs patching to be able to use inline images");
        			print Error("phpMailer needs patching to be able to use inline images");
         	}
-        }
+        } 
         return '';
   	}
 	
