@@ -81,6 +81,9 @@ if (isset($_POST['save']) && isset($_FILES) && is_array($_FILES) && (sizeof($_FI
 			$owner = $_SESSION['logindetails']['id'];
 			$shortname = $iip->cleanFormString($_REQUEST['shortname']);
     		$desc = $iip->cleanFormString($_REQUEST['image_description']);
+    		$info = getimagesize($tmpfile);
+    		$width = $info[0];
+    		$height = $info[1];
     		$fparts = pathinfo($filename);
     		$localfile = tempnam($imgdir,$fparts['filename']);
 			unlink($localfile);  // We just want the name, not the file, since we're modifying the name
@@ -111,7 +114,7 @@ if (isset($_POST['save']) && isset($_FILES) && is_array($_FILES) && (sizeof($_FI
           		}
         		if (is_file($localfile) && filesize($localfile)) {
           			$cid = md5(uniqid(rand(), true));
-    				$query = sprintf("insert into %s (owner, local_name, file_name, short_name, description, type, cid) values (%d, '%s', '%s', '%s', '%s', '%s', '%s')", $imgtbl, $owner, $localfile, $filename, $shortname, $desc, $type, $cid);
+    				$query = sprintf("insert into %s (owner, local_name, file_name, short_name, width, height, description, type, cid) values (%d, '%s', '%s', '%s', %d, %d, '%s', '%s', '%s')", $imgtbl, $owner, $localfile, $filename, $shortname, $width, $height, $desc, $type, $cid);
     				if (!Sql_query($query))
     					Warn('Cannot insert image into the database!'); 
     			} else
@@ -145,7 +148,7 @@ $cstr = "select count(*) from %s ";
 if (!$needle) {  	// Get all the appropriate files
 	if (isSuperUser()) 
 		$qstr .= "owner, ";	// Only the superuser gets to see everyone's files
-	$qstr .= "file_name, short_name, description from %s ";
+	$qstr .= "file_name, short_name, description, width, height from %s ";
 	if (!isSuperUser()) {
 		$qstr .= "where owner = %d order by imgid";
 		$cstr .= "where owner = %d";
@@ -159,7 +162,7 @@ if (!$needle) {  	// Get all the appropriate files
 } else {	// Get the files found in the search
 	if (isSuperUser())
 		$qstr .= "owner, ";
-	$qstr .= "file_name, short_name, description from %s ";
+	$qstr .= "file_name, short_name, description, width, height from %s ";
 	if (is_numeric($needle)) {
 		$temp = "where imgid = %d";
 		$qstr .= $temp;
@@ -215,14 +218,18 @@ else {
 		$mylist->addColumn($pid, 'Short Name', $row['short_name'], $editurl);
 		$mylist->addColumn($pid, 'File Name', $row['file_name'], $editurl);
 		$desc = $row['description'];
+
 		if (strlen($desc) > 40)
 			$desc = substr($desc, 0, 40) . '&hellip;';
+		$desc .= '<br />' . sprintf('<span style="font-size:11px;"><strong>Width:</strong>&nbsp;%d&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<strong>Height:</strong>&nbsp;%d</span>',$row['width'], $row['height']);
+
 		$mylist->addColumn($pid, 'Description', $desc);
 		$mydel = sprintf('<a href="javascript:deleteRec(\'%s\');" class="del">del</a>',"./?page=" . $ourpage . "&pi=" . $ourname . "&delete=" . $pid);
 		$mylist->addColumn($pid, '', $mydel);
-		$paging=simplePaging("ldaimages", $start, $total, $iip->numberPerList,'Images');
-		$mylist->usePanel($paging);
 	}
+	$paging=simplePaging("ldaimages", $start, $total, $iip->numberPerList,'Images');
+	$mylist->usePanel($paging);
+
 }
 
 $list = $mylist->display(0,'myclass');
@@ -238,7 +245,7 @@ $mypanel .= $list . '<br />';
 if (!is_dir($imgdir))
 	Warn("Image directory does not exist! CANNOT UPLOAD FILES!");
 else
-	Info('Click on the ID, Short Name, or File Name of an image to edit its properties.<br />Click on the accompanying trash can to delete an image');
+	Info('Click on the ID, Short Name, or File Name of an image to see it or edit its properties.<br />Click on the accompanying trash can to delete an image');
 $panel = new UIPanel('Inline Image Files',$mypanel,'');
 print $panel->display();
 print('</form>');

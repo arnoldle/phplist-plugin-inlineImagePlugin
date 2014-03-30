@@ -225,7 +225,8 @@ class inlineImagePlugin extends phplistPlugin
     		
     		$attstr = preg_match('/\|(.*)\)/U', $val, $match)? trim($match[1]) : '';
 			$imgtag ='<img src="cid:' . $cid . '"';
-			if ($alt == '')
+			if (($alt == '') && (strpos($attstr, 'alt') !== false)) // Put in alt="...", 
+																	// unless find alt="" explicitly among the attributes
 				$imgtag .= ' alt="' . $desc . '"';
 			$imgtag .= ' ' . trim($attstr) . '>';	
 			

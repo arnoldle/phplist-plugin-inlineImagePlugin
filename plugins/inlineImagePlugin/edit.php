@@ -11,22 +11,19 @@ $wid = $row['width'];
 $hgt = $row['height'];
 
 if (($wid > 600) || ($hgt > 200)) {
-	$factor = 600/$wid;
-	$trial = 200/$hgt;
-	$factor = ($trial < $factor? $trial: $factor);
+	$factor = min(1, 600/$wid, 200/$hgt);
 	$widd = round($factor * $wid);
 	$hgtd = round($factor * $hgt);
-} else {
-	$widd = $wid;
-	$hgtd = $hgt;
-}
+	$warn = (($widd == $wid)? '' :'The image above is not shown full size');
+} 
 
 $fn = 'plugins/inlineImagePlugin/images/'. basename($row['local_name']);
 
 $iip = $GLOBALS['plugins']['inlineImagePlugin'];
 
 print("<img src=\"$fn\" width=\"$widd\" height=\"$hgtd\" style=\"display: block; margin:0px auto 20px auto; border: 4px solid gray; padding:5px; background-color:Silver; \">");
-print("<p style=\"text-align:center; font-size:16px\"><strong>Width: $wid&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Height: $hgt</strong></p>");
+print("<p style=\"text-align:center; font-size:16px\"><strong>Width: $wid&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Height: $hgt</strong><br />
+<span style=\"font-size:14px; color:red;\">$warn</span>");
 print ($iip->myFormStart(PageURL2('ldaimages'), 'name="inlineimageEdit" class="inlineimageplugin" id="inlineimageEdit"'));
 
 $mypanel = '';
