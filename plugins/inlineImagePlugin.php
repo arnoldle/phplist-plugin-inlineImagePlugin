@@ -348,14 +348,14 @@ class inlineImagePlugin extends phplistPlugin
   		$imgs = $this->cache[$this->curid];
   		for($i=0; $i< sizeof($imgs); $i++) {
   		
-printf("%s, %s, %s, %s\n", $imgs[$i]['cid'], $imgs[$i]['file_name'], $mail->encoding, $imgs[$i]['image_type']);
+printf("%s, %s, %s, %s\n", $imgs[$i]['cid'], $imgs[$i]['file_name'], $mail->encoding, $imgs[$i]['type']);
   			// Borrowed from the add_html_image() method of the PHPlistMailer class
   			if (method_exists($mail,'AddEmbeddedImageString')) {
-        		$mail->AddEmbeddedImageString($imgs[$i]['contents'], $imgs[$i]['cid'], $imgs[$i]['file_name'], $mail->encoding, $imgs[$i]['image_type']);
+        		$mail->AddEmbeddedImageString($imgs[$i]['contents'], $imgs[$i]['cid'], $imgs[$i]['file_name'], $mail->encoding, $imgs[$i]['type']);
       		} elseif (method_exists($mail,'AddStringEmbeddedImage')) {
         	## PHPMailer 5.2.5 and up renamed the method
         	## https://github.com/Synchro/PHPMailer/issues/42#issuecomment-16217354
-        		$mail->AddStringEmbeddedImage($imgs[$i]['contents'], $imgs[$i]['cid'], $imgs[$i]['file_name'], $mail->encoding, $imgs[$i]['image_type']);
+        		$mail->AddStringEmbeddedImage($imgs[$i]['contents'], $imgs[$i]['cid'], $imgs[$i]['file_name'], $mail->encoding, $imgs[$i]['type']);
       		} elseif (isset($mail->attachment) && is_array($mail->attachment)) {
         	// Append to $attachment array
         		$cur = count($mail->attachment);
@@ -363,7 +363,7 @@ printf("%s, %s, %s, %s\n", $imgs[$i]['cid'], $imgs[$i]['file_name'], $mail->enco
         		$mail->attachment[$cur][1] = $imgs[$i]['file_name'];
         		$mail->attachment[$cur][2] = $imgs[$i]['file_name'];
         		$mail->attachment[$cur][3] = 'base64';
-        		$mail->attachment[$cur][4] = $imgs[$i]['image_type'];
+        		$mail->attachment[$cur][4] = $imgs[$i]['type'];
         		$mail->attachment[$cur][5] = true; // isStringAttachment
         		$mail->attachment[$cur][6] = "inline";
         		$mail->attachment[$cur][7] = $imgs[$i]['cid'];
