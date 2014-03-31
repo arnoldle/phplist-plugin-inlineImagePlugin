@@ -68,7 +68,7 @@ if (isset($_POST['save']) && isset($_FILES) && is_array($_FILES) && (sizeof($_FI
 			$info = new finfo(FILEINFO_MIME);
 			$tempary = explode(';', $info->file($tmpfile));
 			$type = $tempary[0];
-			$is_image = in_array($type, $iip->image_types);
+			$is_image = in_array($type,  $iip->image_types);
 			if (!$is_image)
 				Warn($typeErr);
 		} elseif (function_exists('mime_content_type')) {
@@ -77,7 +77,15 @@ if (isset($_POST['save']) && isset($_FILES) && is_array($_FILES) && (sizeof($_FI
 			if (!$is_image)
 				Warn($typeErr);
 			}
-		if ($is_image) {
+		$ok = $is_image;
+		$size = filesize($tmpfile);
+		$lmt = getConfig("ImageAttachLimit");
+		if ($ok) {
+			$ok = ($size < 1000 * $lmt);
+			if (!$ok)
+				Warn ("We only allow inline images of $lmt kB or less.<br />Please choose another file!");
+		}
+		if ($ok) {
 			$owner = $_SESSION['logindetails']['id'];
 			$shortname = $iip->cleanFormString($_REQUEST['shortname']);
     		$desc = $iip->cleanFormString($_REQUEST['image_description']);
@@ -114,7 +122,7 @@ if (isset($_POST['save']) && isset($_FILES) && is_array($_FILES) && (sizeof($_FI
           		}
         		if (is_file($localfile) && filesize($localfile)) {
           			$cid = md5(uniqid(rand(), true));
-    				$query = sprintf("insert into %s (owner, local_name, file_name, short_name, width, height, description, type, cid) values (%d, '%s', '%s', '%s', %d, %d, '%s', '%s', '%s')", $imgtbl, $owner, $localfile, $filename, $shortname, $width, $height, $desc, $type, $cid);
+          			$query = sprintf("insert into %s (owner, local_name, file_name, short_name, width, height, description, size, type, cid) values (%d, '%s', '%s', '%s', %d, %d, '%s', '%d', '%s', '%s')", $imgtbl, $owner, $localfile, $filename, $shortname, $width, $height, $desc, $size, $type, $cid);
     				if (!Sql_query($query))
     					Warn('Cannot insert image into the database!'); 
     			} else
@@ -145,10 +153,11 @@ $sform = $searchpanel->display();
 $mylist = new WebblerListing("ID");
 $qstr = "select imgid, ";
 $cstr = "select count(*) from %s ";
+$qstr2 = "file_name, short_name, description, size, width, height from %s ";
 if (!$needle) {  	// Get all the appropriate files
 	if (isSuperUser()) 
 		$qstr .= "owner, ";	// Only the superuser gets to see everyone's files
-	$qstr .= "file_name, short_name, description, width, height from %s ";
+	$qstr .= $qstr2;
 	if (!isSuperUser()) {
 		$qstr .= "where owner = %d order by imgid";
 		$cstr .= "where owner = %d";
@@ -162,7 +171,7 @@ if (!$needle) {  	// Get all the appropriate files
 } else {	// Get the files found in the search
 	if (isSuperUser())
 		$qstr .= "owner, ";
-	$qstr .= "file_name, short_name, description, width, height from %s ";
+	$qstr .= $qstr2;
 	if (is_numeric($needle)) {
 		$temp = "where imgid = %d";
 		$qstr .= $temp;
@@ -224,6 +233,7 @@ else {
 		$desc .= '<br />' . sprintf('<span style="font-size:11px;"><strong>Width:</strong>&nbsp;%d&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<strong>Height:</strong>&nbsp;%d</span>',$row['width'], $row['height']);
 
 		$mylist->addColumn($pid, 'Description', $desc);
+		$mylist->addColumn($pid, 'Size', '<span style="color:red;">' . round($row['size']/1000) . " kB</span>");
 		$mydel = sprintf('<a href="javascript:deleteRec(\'%s\');" class="del">del</a>',"./?page=" . $ourpage . "&pi=" . $ourname . "&delete=" . $pid);
 		$mylist->addColumn($pid, '', $mydel);
 	}
@@ -245,7 +255,7 @@ $mypanel .= $list . '<br />';
 if (!is_dir($imgdir))
 	Warn("Image directory does not exist! CANNOT UPLOAD FILES!");
 else
-	Info('Click on the ID, Short Name, or File Name of an image to see it or edit its properties.<br />Click on the accompanying trash can to delete an image');
+	Info('Click on the ID, Short Name, or File Name to see the image or edit its properties.<br />Click on the accompanying trash can to delete the image');
 $panel = new UIPanel('Inline Image Files',$mypanel,'');
 print $panel->display();
 print('</form>');

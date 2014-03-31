@@ -38,6 +38,7 @@ class inlineImagePlugin extends phplistPlugin
 				"width" => array("integer not null", "The width of the image"),
 				"height" => array("integer not null", "The height of the image"),
 				"description" => array("Text","Description to be used in text message or in alt attribute"),
+				"size" => array("integer not null", "File size in kilobytes"),
 				"type" => array("char(50)", "MIME type of the image"),
 				"cid" => array("char(32) not null","MIME content ID")
 			),
@@ -50,6 +51,17 @@ class inlineImagePlugin extends phplistPlugin
 		);  				// Structure of database tables for this plugin
 	public $tables = array ('image', 'msg');	// Table names are prefixed by Phplist
 	public $numberPerList = 10;		// Number of images to be listed at once in table
+	public $settings = array(
+    		"ImageAttachLimit" => array (
+      			'value' => 100,
+      			'description' => "Limit for size of attached inline images in kB",
+      			'type' => 'integer',
+      			'allowempty' => 0,
+      			"max" => 999,
+      			"min" => 10,
+      			'category'=> 'campaign',
+   			 	)
+   			 );
 	private $processing_queue = false;
     private $cache;			// Keep inline image info while the queue is being processed
     private $curid;			// ID of the current message being processed
@@ -144,6 +156,7 @@ class inlineImagePlugin extends phplistPlugin
     		return 'Brackets are not closed for an inline image placeholder.';
     	
     	$tblname = $GLOBALS['tables']['inlineImagePlugin_image'];
+    	$total = 0;
     	foreach ($match2[0] as $val0) {
     		/* The editor encode HTML special characters. We must decode them
     		for searching with a regex. Also some spaces become '&nbsp; */
@@ -157,25 +170,31 @@ class inlineImagePlugin extends phplistPlugin
     			(substr_count($val, '(') > 1) || (substr_count($val, ')') > 1))
     			return "$val0 is a badly formed placeholder."; 
     		
-    		preg_match('/\(\s*(\S.*\S)\s*(\)|\|)/U', $val, $match);
-    		$src = $match[1];
+    		preg_match('/\(\s*(\S.*)\s*(\)|\|)/U', $val, $match);
+    		$src = trim($match[1]);
     		if (is_numeric($src)) {
-    			$query = sprintf("Select cid from %s where imgid=%d", $tblname, $src); 
-    			if (!isSuperUser())
+    			$query = sprintf("Select size from %s where imgid=%d", $tblname, $src); 
+    			if ( !isSuperUser())
     				$query .= sprintf(" and owner = '%s'", $owner);
-    			if (!Sql_Fetch_Row_Query($query))
+    			$row = Sql_Fetch_Row_Query($query);
+    			if (!$row)
     				return "Unknown image in $val0";
+    			$total += $row[0];
     		} else {
-    			$query = sprintf("Select count(*) from %s where file_name='%s' or short_name='%s'" , $tblname, $src, $src);
+    			$query = sprintf("Select size from %s where file_name='%s' or short_name='%s'" , $tblname, $src, $src);
     			if (!isSuperUser())
     				$query .= sprintf(" and owner = '%s'", $owner);
     			$row = Sql_Fetch_Row_Query($query);
-    			if (!$row[0])
+    			if (!$row)
     				return "Unknown image in $val0";
-    			if ($row[0] > 1)
+    			if (count($row) > 1)
     				return "Ambiguous image specification in $val0";
+    			$total += $row[0];
     		}
     	}
+    	$lmt = getConfig("ImageAttachLimit");
+    	if ($total > 1000 * $lmt)
+    		return "Total size of inline images greater than the $lmt kB limit";
     	return '';
     }
     	
@@ -202,8 +221,8 @@ class inlineImagePlugin extends phplistPlugin
     		$val = strip_tags($val); 	// The editor may insert tags into our placeholder
     		$val = str_replace('&nbsp;', ' ', $val);	// The editor seems to transform spaces into &nbsp; randomly
     		
-    		preg_match('/\(\s*(\S.*\S)\s*(\)|\|)/U', $val, $match);
-    		$src = $match[1];
+    		preg_match('/\(\s*(\S.*)\s*(\)|\|)/U', $val, $match);
+    		$src = trim($match[1]);
     		if (is_numeric($src)) 
     			$query = sprintf("Select imgid, cid, description from %s where imgid=%d", $imagetbl, $src);  			
     		else
