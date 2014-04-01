@@ -226,7 +226,9 @@ class inlineImagePlugin extends phplistPlugin
     		if (is_numeric($src)) 
     			$query = sprintf("Select imgid, cid, description from %s where imgid=%d", $imagetbl, $src);  			
     		else
-    			$query = sprintf("Select imgid, cid, description from %s where file_name='%s' or short_name='%s'" , $imagetbl, $src, $src);
+    			$query = sprintf("Select imgid, cid, description from %s where (file_name='%s' or short_name='%s')" , $imagetbl, $src, $src);
+    		if (!isSuperUser())
+    			$query .= sprintf(" and owner = %d", $_SESSION["logindetails"]["id"]);
     		$row = Sql_Fetch_Row_Query($query);
     		$img = $row[0];
     		$cid = $row[1];
@@ -244,7 +246,7 @@ class inlineImagePlugin extends phplistPlugin
     		
     		$attstr = preg_match('/\|(.*)\)/U', $val, $match)? trim($match[1]) : '';
 			$imgtag ='<img src="cid:' . $cid . '"';
-			if (($alt == '') && (strpos($attstr, 'alt') !== false)) // Put in alt="...", 
+			if (($alt == '') && (strpos($attstr, 'alt') === false)) // Put in alt="...", 
 																	// unless find alt="" explicitly among the attributes
 				$imgtag .= ' alt="' . $desc . '"';
 			$imgtag .= ' ' . trim($attstr) . '>';	
