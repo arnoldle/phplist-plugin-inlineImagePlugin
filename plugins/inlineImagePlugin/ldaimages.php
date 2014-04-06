@@ -224,7 +224,10 @@ else {
 		$mylist->addElement($pid, $editurl);
 		if (isSuperUser())
 			$mylist->addColumn($pid, 'Owner', $row['owner']);
-		$mylist->addColumn($pid, 'Short Name', $row['short_name'], $editurl);
+		if (!$row['short_name'])	// addColumn uses column name if no value but have URL
+			$mylist->addColumn($pid, 'Short Name', '', '');
+		else
+			$mylist->addColumn($pid, 'Short Name', $row['short_name'], $editurl);
 		$mylist->addColumn($pid, 'File Name', $row['file_name'], $editurl);
 		$desc = $row['description'];
 
