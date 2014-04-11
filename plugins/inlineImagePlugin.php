@@ -65,6 +65,7 @@ class inlineImagePlugin extends phplistPlugin
 	private $processing_queue = false;
     private $cache;			// Keep inline image info while the queue is being processed
     private $curid;			// ID of the current message being processed
+    private $limit;
     public $image_types = array(
                   'gif'  => 'image/gif',
                   'jpg'  => 'image/jpeg',
@@ -99,9 +100,10 @@ class inlineImagePlugin extends phplistPlugin
 
 	function __construct()
     {
-    	$this->processing_queue = false;
-    	
+    	$this->processing_queue = false;    	
 		$this->coderoot = dirname(__FILE__) . '/inlineImagePlugin/';
+		$this->limit = getConfig("ImageAttachLimit");
+    	
 		
 		$imagedir = $this->coderoot . "images";
 		if (!is_dir($imagedir))
@@ -146,54 +148,17 @@ class inlineImagePlugin extends phplistPlugin
 		$msg = $messagedata['message'];
 		$owner = $_SESSION['logindetails']['id'];
 		
-		if (strpos($msg, '[IMAGE') === FALSE)  // If no image, nothing to do
-    		return '';
-    	
-    	// Check that the brackets are closed for the inline image placeholders
-    	preg_match_all('/\[IMAGE/', $msg, $match1);
-    	preg_match_all('/\[IMAGE[^\]]+\]/', $msg, $match2);
-    	if (count($match1[0]) != count($match2[0]))
-    		return 'Brackets are not closed for an inline image placeholder.';
-    	
-    	$tblname = $GLOBALS['tables']['inlineImagePlugin_image'];
-    	$total = 0;
-    	foreach ($match2[0] as $val0) {
-    		/* The editor encode HTML special characters. We must decode them
-    		for searching with a regex. Also some spaces become '&nbsp; */
-    		$val = htmlspecialchars_decode($val0, ENT_QUOTES | ENT_HTML401);
-    		$val = str_replace('&nbsp;', ' ', $val);
-    		
-    		if (preg_match('/\(|\)/', $val) === false)	// If no parens, it's not our placeholder
-    			continue;
-    		
-    		if ((!preg_match('/\[IMAGE\s*!?\s*\(/', $val)) || (!preg_match('/\)\s*\]/', $val)) ||
-    			(substr_count($val, '(') > 1) || (substr_count($val, ')') > 1))
-    			return "$val0 is a badly formed placeholder."; 
-    		
-    		preg_match('/\(\s*(\S.*)\s*(\)|\|)/U', $val, $match);
-    		$src = trim($match[1]);
-    		if (is_numeric($src)) {
-    			$query = sprintf("Select size from %s where imgid=%d", $tblname, $src); 
-    			if ( !isSuperUser())
-    				$query .= sprintf(" and owner = '%s'", $owner);
-    			$row = Sql_Fetch_Row_Query($query);
-    			if (!$row)
-    				return "Unknown image in $val0";
-    			$total += $row[0];
-    		} else {
-    			$query = sprintf("Select size from %s where file_name='%s' or short_name='%s'" , $tblname, $src, $src);
-    			if (!isSuperUser())
-    				$query .= sprintf(" and owner = '%s'", $owner);
-    			$row = Sql_Fetch_Row_Query($query);
-    			if (!$row)
-    				return "Unknown image in $val0";
-    			if (count($row) > 1)
-    				return "Ambiguous image specification in $val0";
-    			$total += $row[0];
-    		}
-    	}
-    	$lmt = getConfig("ImageAttachLimit");
-    	if ($total > 1000 * $lmt)
+		if (preg_match_all('/<img[^<>]+\Winline(?:\W|[^<>])*>/Ui', $msg, $match)) {
+			$total = 0;
+			foreach ($match[0] as $val) {
+				$src = $this->getAttribute($val, "src");
+				if (!$str = file_get_contents($str);
+					return 'Cannot access image: ' . $val;
+				$total += strlen($str);
+			}
+		}
+		
+		if ($total > 1000 * $this->limit)
     		return "Total size of inline images greater than the $lmt kB limit";
     	return '';
     }
