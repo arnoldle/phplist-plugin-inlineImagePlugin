@@ -1,7 +1,7 @@
 <?php
 
 /**
- * inlineImage Plugin v1.0a3
+ * inlineImage Plugin v2.0a1
  * 
  * This plugin defines a placeholder that allows inline images to be inserted into
  * messages
@@ -24,32 +24,26 @@ class inlineImagePlugin extends phplistPlugin
      *  Inherited variables
      */
     public $name = 'Inline Image Plugin';
-    public $version = '1.0a3';
+    public $version = '2.0a1';
     public $enabled = false;
     public $authors = 'Arnold Lesikar';
     public $description = 'Allows the use of inline images in messages';
     public $DBstruct =array (	//For creation of the required tables by Phplist
     		'image' => array(
     			"imgid" => array("integer not null primary key auto_increment","Image numerical ID"),
-    			'owner' => array("integer not null", "ID of user who uploaded the image"),
-    			'local_name' => array("varchar(255) not null","A unique local file name including extension"),
-				"file_name" => array("varchar(255) not null","File name including extension"),
-				"short_name" => array("varchar(255)", "Convenient name for image assigned by user"),
-				"width" => array("integer not null", "The width of the image"),
-				"height" => array("integer not null", "The height of the image"),
-				"description" => array("Text","Description to be used in text message or in alt attribute"),
-				"size" => array("integer not null", "File size in kilobytes"),
+    			"file_name" => array("varchar(255) not null","File name including extension"),
+    			"cksum" => array ("varchar(45) not null", "sha1 checksum for the file contents"),
+				'local_name' => array("varchar(255) not null","A unique local file name including extension"),
 				"type" => array("char(50)", "MIME type of the image"),
 				"cid" => array("char(32) not null","MIME content ID")
 			),
 			'msg' => array(
 				"id" => array("integer not null", "Message ID"),
 				"imgid" => array("integer not null","Image numerical ID"),
-				"texttag" => array("Text", "Replacement for the placeholder in text messages"),
 				"imagetag" => array("Text", "HTML image tag with attributes and cid")
 			)
 		);  				// Structure of database tables for this plugin
-	public $tables = array ('image', 'msg');	// Table names are prefixed by Phplist
+	public $tables = array ();	// Table names are prefixed by Phplist
 	public $numberPerList = 10;		// Number of images to be listed at once in table
 	public $settings = array(
     		"ImageAttachLimit" => array (
@@ -57,7 +51,7 @@ class inlineImagePlugin extends phplistPlugin
       			'description' => "Limit for size of attached inline images in kB",
       			'type' => 'integer',
       			'allowempty' => 0,
-      			"max" => 999,
+      			"max" => 499,
       			"min" => 10,
       			'category'=> 'campaign',
    			 	)
@@ -66,7 +60,9 @@ class inlineImagePlugin extends phplistPlugin
     private $cache;			// Keep inline image info while the queue is being processed
     private $curid;			// ID of the current message being processed
     private $limit;
-    public $image_types = array(
+    private $myname = 'inlineImagePlugin';
+    
+    public $image_types = array(	// Taken from class.phplistmailer.php
                   'gif'  => 'image/gif',
                   'jpg'  => 'image/jpeg',
                   'jpeg'  => 'image/jpeg',
@@ -77,39 +73,60 @@ class inlineImagePlugin extends phplistPlugin
                   'tiff'  => 'image/tiff'
             );
     
-    public $topMenuLinks = array(
-    			'ldaimages' => array('category' => 'campaigns')
-    			); 
-  	public $pageTitles = array('ldaimages' => 'Manage Inline Images');
-
-     
+    /* No longer have pages associated with this plugin! */
     function adminmenu() {
-    	return array ("ldaimages" => "Manage Inline Images");
+    	return array ();
   	}
-  	
-  	function cleanFormString($str) {
-		return sql_escape(strip_tags(trim($str)));
-	}
-	
-	function myFormStart($action, $additional) {
-		$html = formStart($additional);
-		preg_match('/action\s*=\s*".*"/Ui', $html, $match);
-		$html = str_replace($match[0], 'action="' . $action .'"', $html);
-		return $html;
-	}
-
-	function __construct()
+  	  	
+  	function __construct()
     {
-    	$this->processing_queue = false;    	
+     	$this->processing_queue = false;    	
 		$this->coderoot = dirname(__FILE__) . '/inlineImagePlugin/';
-		$this->limit = getConfig("ImageAttachLimit");
-    	
 		
-		$imagedir = $this->coderoot . "images";
+		if (!is_dir($this->coderoot))
+			mkdir ($this->coderoot);
+		$imagedir = $this->coderoot . "images/";
 		if (!is_dir($imagedir))
 			mkdir ($imagedir);
-            	
+		
+		if (file_exists($this->coderoot . 'ldaimages.php')) {	// Do we have the pages for our version 1
+			// Remove old pages
+			unlink($this->coderoot . 'edit.php');
+			unlink($this->coderoot . 'ldaimages.php');
+			
+			// Remove old image files as well
+			$files = glob($this->coderoot . 'images/*.*');
+			foreach ($files as $f)
+				unlink ($f);
+		} 
+		    		
 		parent::__construct();
+    }
+    
+    function initialise() {
+    	/* Make sure database is up to date */
+		global $table_prefix;
+		$imgtbl = $this->tables['image'];
+		$msgtbl = $this->tables['msg'];
+
+		if (Sql_Table_exists($imgtbl) && (!Sql_Table_Column_Exists($imgtbl, "cksum"))) {	// Have old database tables?
+			// Drop the old tables
+			Sql_Drop_Table($imgtbl);
+			Sql_Drop_Table($msgtbl);
+			
+			// Flag the plugin as not intialized so that the parent will create the new tables
+			$entry = md5('plugin-inlineImagePlugin-initialised');
+			$query = sprintf("delete from %s where item='%s'", $GLOBALS["tables"]["config"], $entry); 
+			Sql_Query ($query);
+			// Force reloading of config arrays, so that our parent sees the plugin
+			// as not initialized.
+			unset($_SESSION['config']);
+  			unset($GLOBALS['config']); 
+  			unset($_SESSION["dbtables"]); 	// Empty the cache that still contains our table names
+		} 
+		
+		parent::initialise();
+
     }
     
     // The value of an attribute in an inline image placeholder
@@ -137,6 +154,34 @@ class inlineImagePlugin extends phplistPlugin
 		else
 			return $match[0];
 	}
+	
+	// getMimeType -- Check the extension from the original name of the file
+	// then check the file contents for type, using the temp file where we have
+	// stored the data. We would not need to do this by a way of a temp file
+	// if we could be sure we were running PHP >= 5.3.
+	private function getMimeType($ext, $tempfile) {
+		/* Right file extension? */
+		$is_image = key_exists($ext, $this->image_types);
+		if (!$is_image)
+			return false;
+		$type = $this->image_types[$ext];
+
+		/* Even if it's the right extension, it still might not be a genuine image */				
+		if (class_exists('finfo')) {
+			$info = new finfo(FILEINFO_MIME);
+			$tempary = explode(';', $info->file($tempfile));
+			$type = $tempary[0];
+			$is_image = in_array($type,  $this->image_types);
+			if (!$is_image)
+				return false;
+		} elseif (function_exists('mime_content_type')) {
+			$type = mime_content_type ($tempfile);		// Have no comparable function for a string
+			$is_image = in_array($type, $this->image_types);
+			if (!$is_image)
+				return false;
+		}
+		return $type;
+	}
 
 	/* allowMessageToBeQueued
 	* called to verify that the message can be added to the queue
@@ -146,22 +191,47 @@ class inlineImagePlugin extends phplistPlugin
 	function allowMessageToBeQueued($messagedata = array()) 
 	{
 		$msg = $messagedata['message'];
-		$owner = $_SESSION['logindetails']['id'];
+		$tempfile = $this->coderoot . 'images/tempimg.tmp';
+		$limit = getConfig("ImageAttachLimit");
 		
-		if (preg_match_all('/<img[^<>]+\Winline(?:\W|[^<>])*>/Ui', $msg, $match)) {
+		// Merge the message and template to check the images
+		if ($messagedata["template"]) {
+    		$req = Sql_Fetch_Row_Query("select template from {$GLOBALS["tables"]["template"]} where id = {$messagedata["template"]}");
+    		$template = stripslashes($req[0]);
+    		$msg = str_replace("[CONTENT]",$msg, $template);
+    	}
+				
+		/* Class="inline" marks inline images */
+		if (preg_match_all('/<img[^<>]+\Winline(?:\W|[^<>])*>/Ui', $msg, $match)) { //Collect inline tags
 			$total = 0;
 			foreach ($match[0] as $val) {
 				$src = $this->getAttribute($val, "src");
-				if (!$str = file_get_contents($str);
-					return 'Cannot access image: ' . $val;
+				if (!$str = file_get_contents($src))
+					return 'Cannot access image file: ' . $val;
+				file_put_contents($tempfile, $str);	// Create a temporary file in order to check mime type
+													// We do this only because PHP may be earlier than 5.3
+				
+				/* Is it an image file? */
+				if (!$type = $this->getMimeType(pathInfo($src, PATHINFO_EXTENSION), $tempfile))
+					return "The URL does not reference an image file in $val";
 				$total += strlen($str);
 			}
-		}
-		
-		if ($total > 1000 * $this->limit)
-    		return "Total size of inline images greater than the $lmt kB limit";
-    	return '';
+
+			unlink ($tempfile); 	// Cleanliness is next to godliness!
+			/* Total size of the inline files must remain within limits! */
+			if ($total > 1000 * $limit)
+    			return "Total size of inline images greater than the " . $limit . " kB limit";
+		} else  // No inline image files
+			return '';
     }
+    
+    private function getTempFilename($filename) {
+    	$fparts = pathinfo($filename);
+    	$tempnm = tempnam($this->coderoot . 'images/', $fparts['filename']);
+		unlink($tempnm);  // We just want the name, not the file, since we're modifying the name
+		$tempnm .= '.' . $fparts['extension'];
+		return $tempnm;
+	}
     	
 	/* messageQueued
 	* called when a message is placed in the queue
@@ -170,57 +240,68 @@ class inlineImagePlugin extends phplistPlugin
 	*
 	* This is where we queue the inline images associated with the message.
 	*/
-
+            	
 	function messageQueued($id) {
-		$imagetbl = $GLOBALS['tables']['inlineImagePlugin_image'];
+		$imgtbl = $GLOBALS['tables']['inlineImagePlugin_image'];
 		$msgtbl = $GLOBALS['tables']['inlineImagePlugin_msg'];
+		
 		$msgdata = loadMessageData($id);
-		// In regex below, must account for editor's possible substitution of spaces by &nbsp;
-    	preg_match_all('/\[IMAGE[^\(\)]*\([^\(\)]+\)(\s|&nbsp;)*\]/U', $msgdata['message'], $match); 
- 	
+		
+		// Merge the message and template so we have all the images
+		if ($msgdata["template"]) {
+    		$req = Sql_Fetch_Row_Query("select template from {$GLOBALS["tables"]["template"]} where id = {$msgdata["template"]}");
+    		$template = stripslashes($req[0]);
+    		$msgdata['message'] = str_replace("[CONTENT]",$msgdata['message'], $template);
+    	}
+		
+		// Collect the inline image tags
+    	preg_match_all('/<img[^<>]+\Winline(?:\W|[^<>])*>/Ui', $msgdata['message'], $match);
+		
 		//Store everything needed for rapid processing of messages
 		foreach ($match[0] as $val) {
-			/* The editor encode HTML special characters. We must decode them
-    		for searching with a regex. Also some spaces become '&nbsp; */
-    		$val = htmlspecialchars_decode($val, ENT_QUOTES | ENT_HTML401);
-    		$val = strip_tags($val); 	// The editor may insert tags into our placeholder
-    		$val = str_replace('&nbsp;', ' ', $val);	// The editor seems to transform spaces into &nbsp; randomly
-    		
-    		preg_match('/\(\s*(\S.*)\s*(\)|\|)/U', $val, $match);
-    		$src = trim($match[1]);
-    		if (is_numeric($src)) 
-    			$query = sprintf("Select imgid, cid, description from %s where imgid=%d", $imagetbl, $src);  			
-    		else
-    			$query = sprintf("Select imgid, cid, description from %s where (file_name='%s' or short_name='%s')" , $imagetbl, $src, $src);
-    		if (!isSuperUser())
-    			$query .= sprintf(" and owner = %d", $_SESSION["logindetails"]["id"]);
-    		$row = Sql_Fetch_Row_Query($query);
-    		$img = $row[0];
-    		$cid = $row[1];
-    		$desc = $row[2];
-    		if (!preg_match('/\[IMAGE\s*!/', $val)) {	// '!' after [IMAGE flags no text replacement
-    			$txt = '[IMAGE: ';
-    			$alt = $this->getAttribute($val, 'alt');
-				if ($alt != '')
-					$txt .= $alt .']';
-				else
-					$txt .= $desc .']';
-				$txt = strip_tags(HTML2Text($txt)); //HTML2Text produces wordwrap with <br /> at 70 chars! 			
-    		} else
-    			$txt = '';
-    		
-    		$attstr = preg_match('/\|(.*)\)/U', $val, $match)? trim($match[1]) : '';
-			$imgtag ='<img src="cid:' . $cid . '"';
-			if (($alt == '') && (strpos($attstr, 'alt') === false)) // Put in alt="...", 
-																	// unless find alt="" explicitly among the attributes
-				$imgtag .= ' alt="' . $desc . '"';
-			$imgtag .= ' ' . trim($attstr) . '>';	
-			
-			$query = sprintf("insert into %s values (%d, '%d', '%s', '%s')", $msgtbl, $id, $img,
-    			sql_escape($txt), sql_escape($imgtag));
-			Sql_Query($query);
+			$src = $this->getAttribute($val, "src");
+    		$fcontents = file_get_contents($src);
+    		$hsh = sha1($fcontents);	// Use a checksum to distinguish different files with same name
+    		$filename = basename ($src);
+    		$query = sprintf("select imgid, cid, local_name from %s where filename='%s' and cksum='%s'", $imgtbl, $filename, $hsh);
+    		if (!($row = Sql_Fetch_Row_Query($query))) {
+    			$localfile = $this->getTempFilename($filename);	// File name in image directory
+    			file_put_contents($localfile, $fcontents);
+    			$type = $this->getMimeType(pathInfo($src, PATHINFO_EXTENSION), $localfile);
+    			$cid = md5(uniqid(rand(), true));
+    			$query = sprintf("insert into %s (file_name, cksum, local_name, type, cid) values ('%s', '%s', '%s', '%s', %s)", $imgtbl, sql_escape($filename), sql_escape($hash), sql_escape($localfile), sql_escape($type), sql_escape($cid));
+    			if (Sql_Query($query)) {
+    				$query = sprintf("select imgid from %s where filename='%s' and cksum='%s'", $imgtbl, $filename, $hsh);
+    				$row = Sql_Fetch_Row_Query($query);
+    				$imgid = $row[0];
+    			}		
+    		} else if (!file_exists($row[2])) { // We've had the image before, but it has 
+    											// been stored in the plugin only as a temporary file
+    			$localfile = $this->getTempFilename($filename);
+    			file_put_contents($localfile, $fcontents);
+    			$query = sprintf("update %s set local_name='%s' where imgid=%d", $imgtbl, $localfile, $row[0]);
+    			Sql_Query($query);
+    		} else {
+    			$imgid = $row[0];
+    			$cid = $row[1];
+    		}
+    		$srcstr = $this->getAttribute($val, "src", 0);
+    		$imgtag = str_replace($srcstr, 'src="cid:' . $cid . '"', $val);
+    		$query = sprintf("insert into %s values (%d, '%d', '%s', '%s')", $msgtbl, $id, $imgid, sql_escape($imgtag));
+			Sql_Query($query);	
     	}
+	
   	} 
+  	
+  	/* messageReQueued
+  	* called when a message is placed back in the queue
+	* @param integer id message id
+   	* @return null
+   	*/
+
+  	function messageReQueued($id) {
+  		$this->messageQueued($id);	// We don't care whether the message has been sent before
+  	}
   	
   	/*
 	* campaignStarted
@@ -236,7 +317,7 @@ class inlineImagePlugin extends phplistPlugin
   		$msgtbl = $GLOBALS['tables']['inlineImagePlugin_msg'];
   		$imgtbl = $GLOBALS['tables']['inlineImagePlugin_image'];
   		
-		$query = sprintf('select texttag, imagetag, cid, type, file_name, local_name from %s natural join %s where id = %d', $msgtbl, $imgtbl, $this->curid);
+		$query = sprintf('select imagetag, cid, type, file_name, local_name from %s natural join %s where id = %d', $msgtbl, $imgtbl, $this->curid);
   		$result = Sql_Query($query);
   		$i = 0;
   		while ($row = Sql_Fetch_Assoc($result)) {
@@ -253,14 +334,10 @@ class inlineImagePlugin extends phplistPlugin
    	* @param string  destination: destination email
    	* @param array   userdata: associative array with data about user
    	* @return string parsed content
+   	*
+   	* No images in the text version of the message, so nothing to do
    	*/
   	function parseOutgoingTextMessage($messageid, $content, $destination, $userdata = null) {
-  		
-  		// In regex below, must account for possible substitution of spaces by &nbsp;
-    	preg_match_all('/\[IMAGE[^\(\)]*\([^\(\)]+\)(\s|&nbsp;)*\]/U', $content, $match); 
-    	for ($i = 0; $i < sizeof($match[0]); $i++) { // And replace them
-  				$content = str_replace($match[0][$i], $this->cache[$messageid][$i]['texttag'], $content);
-  		}
     	return $content;
   	}
 
@@ -275,7 +352,7 @@ class inlineImagePlugin extends phplistPlugin
   	function parseOutgoingHTMLMessage($messageid, $content, $destination, $userdata = null) {
   		
   		// In regex below, must account for possible substitution of spaces by &nbsp;
-    	preg_match_all('/\[IMAGE[^\(\)]*\([^\(\)]+\)(\s|&nbsp;)*\]/U', $content, $match); 
+    	preg_match_all('/<img[^<>]+\Winline(?:\W|[^<>])*>/Ui', $content, $match);
     	for ($i = 0; $i < sizeof($match[0]); $i++) { // And replace them
   				$content = str_replace($match[0][$i], $this->cache[$messageid][$i]['imagetag'], $content);
   		}
@@ -297,6 +374,12 @@ class inlineImagePlugin extends phplistPlugin
    	*/
   	function messageQueueFinished() {
   		$this->processing_queue = false;
+  		
+  		// The image directory files are only temporary; remove them
+  		$imgdir = $this->coderoot . 'images/';
+  		$filelist = scandir($imgdir);
+  		foreach ($filelist as $thefile)
+  			unlink ($imgdir . $thefile);
   	}
 
 	/**
@@ -315,7 +398,6 @@ class inlineImagePlugin extends phplistPlugin
   		$imgs = $this->cache[$this->curid];
   		for($i=0; $i< sizeof($imgs); $i++) {
   		
-printf("%s, %s, %s, %s\n", $imgs[$i]['cid'], $imgs[$i]['file_name'], $mail->encoding, $imgs[$i]['type']);
   			// Borrowed from the add_html_image() method of the PHPlistMailer class
   			if (method_exists($mail,'AddEmbeddedImageString')) {
         		$mail->AddEmbeddedImageString($imgs[$i]['contents'], $imgs[$i]['cid'], $imgs[$i]['file_name'], $mail->encoding, $imgs[$i]['type']);
@@ -341,5 +423,4 @@ printf("%s, %s, %s, %s\n", $imgs[$i]['cid'], $imgs[$i]['file_name'], $mail->enco
         } 
         return '';
   	}
-	
 }
