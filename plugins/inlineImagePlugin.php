@@ -207,15 +207,23 @@ class inlineImagePlugin extends phplistPlugin
 		// Merge the message and template to gather the images
 		// Make sure that we have all parts of the message that may contain images
 		if ($messagedata["template"]) {
-			$template = $this->loadTemplate($messagedata["template"]);
-			if (strpos($template, "[CONTENT]"))
+			$template= $this->loadTemplate($messagedata["template"]);
+			if (strpos($template, "[CONTENT]"))  	// Allow that there might be a bad template
+													// without a [CONTENT] placeholder. It's not our job to catch it.
     			$msg = str_replace("[CONTENT]",$msg, $template);
     	}
     	if (strpos($msg, "[FOOTER]") !== false)
     		$msg = str_ireplace("[FOOTER]", $messagedata["footer"],$msg);
+    	else									// Phplist always adds a footer.
+    		$msg .= $messagedata["footer"]; 	// We're not constructing the message, just collecting inline image files
 				
-		/* Class="inline" marks inline images */
-		if (preg_match_all('#<img[^<>]+\Winline(?:\W.*(?:/)?)?>#Ui', $msg, $match)) { //Collect inline tags
+		/* Collect the inline image tags. CSS class="inline" marks inline images */
+		// The regex below matches <img .... =inline> or <img...."inline"> or <img....=inline >
+		// or <img ...."inline"/> or <img ... "inline" /> or <img ... "inline another class"... />
+		// It does not match something like <img ...."inlineclass" .../>
+		// This same regex is also used in the messageQueued() method and 
+		// in the method parseOutgoingHTMLMessage() below.
+		if (preg_match_all('#<img[^<>]+\Winline(?:\W.*(?:/)?)?>#Ui', $msg, $match)) {
 			$total = 0;
 			foreach ($match[0] as $val) {
 
@@ -231,7 +239,6 @@ class inlineImagePlugin extends phplistPlugin
 				$total += strlen($str);
 			}
 
-			unlink ($tempfile); 	// Cleanliness is next to godliness!
 			/* Total size of the inline files must remain within limits! */
 			if ($total > 1000 * $limit)
     			return "Total size of inline images greater than the " . $limit . " kB limit";
@@ -260,6 +267,7 @@ class inlineImagePlugin extends phplistPlugin
 		$msgtbl = $GLOBALS['tables']['inlineImagePlugin_msg'];
 		
 		$msgdata = loadMessageData($id);
+		$msg = $msgdata['message'];
 		
 		// Merge the message and template to check the images
 		// Make sure that we have all parts of the message that may contain images
@@ -268,13 +276,16 @@ class inlineImagePlugin extends phplistPlugin
 			if (strpos($template, "[CONTENT]"))
     			$msg = str_replace("[CONTENT]",$msg, $template);
     	}
+    	
     	if (strpos($msg, "[FOOTER]") !== false)
     		$msg = str_ireplace("[FOOTER]", $msgdata["footer"],$msg);
+		else									// Phplist always adds a footer.
+    		$msg .= $msgdata["footer"]; 	// We're not constructing the message, just collecting inline image files
 
 		
 		// Collect the inline image tags
-    	preg_match_all('#<img[^<>]+\Winline(?:\W.*(?:/)?)?>#Ui', $msgdata['message'], $match);
-		
+    	preg_match_all('#<img[^<>]+\Winline(?:\W.*(?:/)?)?>#Ui', $msg, $match);
+
 		//Store everything needed for rapid processing of messages
 		foreach ($match[0] as $val) {
 			$src = $this->getAttribute($val, "src");
@@ -287,7 +298,7 @@ class inlineImagePlugin extends phplistPlugin
     			file_put_contents($localfile, $fcontents);
     			$type = $this->getMimeType(pathInfo($src, PATHINFO_EXTENSION), $localfile);
     			$cid = md5(uniqid(rand(), true));
-    			$query = sprintf("insert into %s (file_name, cksum, local_name, type, cid) values ('%s', '%s', '%s', '%s', '%s')", $imgtbl, sql_escape($filename), sql_escape($hash), sql_escape($localfile), sql_escape($type), sql_escape($cid));
+    			$query = sprintf("insert into %s (file_name, cksum, local_name, type, cid) values ('%s', '%s', '%s', '%s', '%s')", $imgtbl, sql_escape($filename), sql_escape($hsh), sql_escape($localfile), sql_escape($type), sql_escape($cid));
     			if (Sql_Query($query)) {
     				$query = sprintf("select imgid from %s where file_name='%s' and cksum='%s'", $imgtbl, $filename, $hsh);
     				$row = Sql_Fetch_Row_Query($query);
