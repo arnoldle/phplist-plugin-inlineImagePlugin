@@ -57,10 +57,11 @@ class inlineImagePlugin extends phplistPlugin
    			 	)
    			 );
 	private $processing_queue = false;
+	private $forwarding_message = false;
     private $cache;			// Keep inline image info while the queue is being processed
     private $curid;			// ID of the current message being processed
     private $limit;			// Max total size of inline image files attached to a message
-    private $imgdirlimit = 2000; 	// Limiting size for image directory in kB before we clean it out
+    private $imgdirlimit = 4000; 	// Limiting size for image directory in kB before we clean it out
     
     public $image_types = array(	// Taken from class.phplistmailer.php
                   'gif'  => 'image/gif',
@@ -80,7 +81,8 @@ class inlineImagePlugin extends phplistPlugin
   	  	
   	function __construct()
     {
-     	$this->processing_queue = false;    	
+     	$this->processing_queue = false; 
+     	$this->forwarding_message = false;   	
 		$this->coderoot = dirname(__FILE__) . '/inlineImagePlugin/';
 		
 		if (!is_dir($this->coderoot))
@@ -333,16 +335,9 @@ class inlineImagePlugin extends phplistPlugin
   		$this->messageQueued($id);	// We don't care whether the message has been sent before
   	}
   	
-  	/*
-	* campaignStarted
-	* called when sending of a campaign starts
-	* @param array messagedata - associative array with all data for campaign
-	* @return null
-	*
-	* Here is where we cache the image data that will be used in constructing the message
-	*/
-
-  	function campaignStarted($messagedata = array()) {
+  	// Set $this->curid and cache the data necessary to formulate the outgoing message
+  	// with inline image attachments
+  	function loadImageCache($messagedata = array()) {
   		$this->curid = $messagedata['id'];
   		$msgtbl = $GLOBALS['tables']['inlineImagePlugin_msg'];
   		$imgtbl = $GLOBALS['tables']['inlineImagePlugin_image'];
@@ -355,6 +350,20 @@ class inlineImagePlugin extends phplistPlugin
   			$this->cache[$this->curid][$i]['contents'] = file_get_contents($row['local_name']);
   			$i++;
   		}
+  	} 
+  	
+  	
+  	/*
+	* campaignStarted
+	* called when sending of a campaign starts
+	* @param array messagedata - associative array with all data for campaign
+	* @return null
+	*
+	* Here is where we cache the image data that will be used in constructing the message
+	*/
+
+  	function campaignStarted($messagedata = array()) {
+  		$this->loadImageCache($messagedata);
   	} 
   	
 	/* 
@@ -380,9 +389,17 @@ class inlineImagePlugin extends phplistPlugin
    	* @return string parsed content
    	*/
   	function parseOutgoingHTMLMessage($messageid, $content, $destination, $userdata = null) {
+  		if (!$this->processing_queue) {	// Cannot get here unless processing queue or forwarding a message
+  			$this->forwarding_message = true;
+  			// Have to make sure that we have cached data to deal with the message
+  			if (!$this->curid) { // We may be forwarding the message to a further address after the first
+  				$msgdata = loadMessageData ($messageid);
+  				$this->loadImageCache($msgdata);
+  			}
+  		}
   		
-  		// In regex below, must account for possible substitution of spaces by &nbsp;
-    	preg_match_all('#<img[^<>]+\Winline(?:\W.*(?:/)?)?>#Ui', $content, $match);
+  		// Replace all the image tags for inline images with tags pointing to the attached files	
+  		preg_match_all('#<img[^<>]+\Winline(?:\W.*(?:/)?)?>#Ui', $content, $match);
     	for ($i = 0; $i < sizeof($match[0]); $i++) { // And replace them
   				$content = str_replace($match[0][$i], $this->cache[$messageid][$i]['imagetag'], $content);
   		}
@@ -396,6 +413,7 @@ class inlineImagePlugin extends phplistPlugin
    	*/
   	function processQueueStart() {
   		$this->processing_queue = true;
+  		$this->forwarding_message = false;
   	}
   	
   	/* messageQueueFinished
@@ -429,7 +447,7 @@ class inlineImagePlugin extends phplistPlugin
    	*/
   	function messageHeaders($mail) {
   	
-  		if (!$this->processing_queue)	// Administrative message?
+  		if ((!$this->processing_queue) && (!$this->forwarding_message)) 	// Administrative message?
   			return;
   		
   		$imgs = $this->cache[$this->curid];
