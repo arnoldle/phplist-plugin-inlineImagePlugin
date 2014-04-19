@@ -43,8 +43,6 @@ class inlineImagePlugin extends phplistPlugin
 				"imagetag" => array("Text", "HTML image tag with attributes and cid")
 			)
 		);  				// Structure of database tables for this plugin
-	public $tables = array ();	// Table names are prefixed by Phplist
-	public $numberPerList = 10;		// Number of images to be listed at once in table
 	public $settings = array(
     		"ImageAttachLimit" => array (
       			'value' => 100,
@@ -63,7 +61,7 @@ class inlineImagePlugin extends phplistPlugin
     private $limit;			// Max total size of inline image files attached to a message
     private $imgdirlimit = 4000; 	// Limiting size for image directory in kB before we clean it out
     
-    public $image_types = array(	// Taken from class.phplistmailer.php
+    public $image_types = array(	// Taken from class.phplistmailer.php, except don't allow Flash .swf files
                   'gif'  => 'image/gif',
                   'jpg'  => 'image/jpeg',
                   'jpeg'  => 'image/jpeg',
@@ -91,7 +89,7 @@ class inlineImagePlugin extends phplistPlugin
 		if (!is_dir($imagedir))
 			mkdir ($imagedir);
 		
-		if (file_exists($this->coderoot . 'ldaimages.php')) {	// Do we have the pages for our version 1
+		if (file_exists($this->coderoot . 'ldaimages.php')) {	// Do we have the pages for our version 1?
 			// Remove old pages
 			unlink($this->coderoot . 'edit.php');
 			unlink($this->coderoot . 'ldaimages.php');
