@@ -59,7 +59,7 @@ class inlineImagePlugin extends phplistPlugin
     private $cache;			// Keep inline image info while the queue is being processed
     private $curid;			// ID of the current message being processed
     private $limit;			// Max total size of inline image files attached to a message
-    private $imgdirlimit = 4000; 	// Limiting size for image directory in kB before we clean it out
+    private $imgdirlimit = 2000; 	// Limiting size for image directory in kB before we clean it out
     
     public $image_types = array(	// Taken from class.phplistmailer.php, except don't allow Flash .swf files
                   'gif'  => 'image/gif',
@@ -269,6 +269,10 @@ class inlineImagePlugin extends phplistPlugin
 		$msgdata = loadMessageData($id);
 		$msg = $msgdata['message'];
 		
+		$query = sprintf ("select * from %s where id=%d", $msgtble, $id);
+		$queued_already = (Sql_Num_Rows(Sql_Query($query)) > 0);	// Forwarding or requeueing
+																	// a message already sent
+		
 		// Merge the message and template to check the images
 		// Make sure that we have all parts of the message that may contain images
 		if ($msgdata["template"]) {
@@ -281,7 +285,6 @@ class inlineImagePlugin extends phplistPlugin
     		$msg = str_ireplace("[FOOTER]", $msgdata["footer"],$msg);
 		else									// Phplist always adds a footer.
     		$msg .= $msgdata["footer"]; 	// We're not constructing the message, just collecting inline image files
-
 		
 		// Collect the inline image tags
     	preg_match_all('#<img[^<>]+\Winline(?:\W.*(?:/)?)?>#Ui', $msg, $match);
@@ -315,10 +318,13 @@ class inlineImagePlugin extends phplistPlugin
     			$imgid = $row[0];
     			$cid = $row[1];
     		}
-    		$srcstr = $this->getAttribute($val, "src", 0);
-    		$imgtag = str_replace($srcstr, 'src="cid:' . $cid . '"', $val);
-    		$query = sprintf("insert into %s values (%d, %d, '%s')", $msgtbl, $id, $imgid, sql_escape($imgtag));
-			Sql_Query($query);	
+    		
+    		if (!$queued_already) {	// Associate the image with the message
+    			$srcstr = $this->getAttribute($val, "src", 0);
+    			$imgtag = str_replace($srcstr, 'src="cid:' . $cid . '"', $val);
+    			$query = sprintf("insert into %s values (%d, %d, '%s')", $msgtbl, $id, $imgid, sql_escape($imgtag));
+				Sql_Query($query);
+			}
     	}
 	
   	} 
@@ -391,6 +397,8 @@ class inlineImagePlugin extends phplistPlugin
   			$this->forwarding_message = true;
   			// Have to make sure that we have cached data to deal with the message
   			if (!$this->curid) { // We may be forwarding the message to a further address after the first
+  				$this->messageQueued($messageid);	// Make sure that we still have the image files in
+  													// the plugin image subdirectory
   				$msgdata = loadMessageData ($messageid);
   				$this->loadImageCache($msgdata);
   			}
