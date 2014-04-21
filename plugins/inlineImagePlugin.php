@@ -1,7 +1,7 @@
 <?php
 
 /**
- * inlineImage Plugin v2.0a2
+ * inlineImage Plugin v2.0a3
  * 
  * This plugin defines a placeholder that allows inline images to be inserted into
  * messages
@@ -24,7 +24,7 @@ class inlineImagePlugin extends phplistPlugin
      *  Inherited variables
      */
     public $name = 'Inline Image Plugin';
-    public $version = '2.0a2';
+    public $version = '2.0a3';
     public $enabled = false;
     public $authors = 'Arnold Lesikar';
     public $description = 'Allows the use of inline images in messages';
@@ -40,6 +40,7 @@ class inlineImagePlugin extends phplistPlugin
 			'msg' => array(
 				"id" => array("integer not null", "Message ID"),
 				"imgid" => array("integer not null","Image numerical ID"),
+				"original" => array ("Text", "Original HTML image tag"),
 				"imagetag" => array("Text", "HTML image tag with attributes and cid")
 			)
 		);  				// Structure of database tables for this plugin
@@ -109,7 +110,8 @@ class inlineImagePlugin extends phplistPlugin
 		$imgtbl = $this->tables['image'];
 		$msgtbl = $this->tables['msg'];
 
-		if (Sql_Table_exists($imgtbl) && (!Sql_Table_Column_Exists($imgtbl, "cksum"))) {	// Have old database tables?
+		if ((Sql_Table_exists($imgtbl) && (!Sql_Table_Column_Exists($imgtbl, "cksum"))) 
+		|| (Sql_Table_exists($msgtbl) && (!Sql_Table_Column_Exists($msgtbl, "original")))){	// Have old database tables?
 			// Drop the old tables
 			Sql_Drop_Table($imgtbl);
 			Sql_Drop_Table($msgtbl);
@@ -199,7 +201,24 @@ class inlineImagePlugin extends phplistPlugin
 	*/
 	function allowMessageToBeQueued($messagedata = array()) 
 	{
+		$msgtbl = $GLOBALS['tables']['inlineImagePlugin_msg'];
+		
 		$msg = $messagedata['message'];
+		$id = $messagedata['id'];
+		
+		$query = sprintf ("select * from %s where id=%d", $msgtbl, $id);
+		$queued_already = (Sql_Num_Rows(Sql_Query($query)) > 0);
+		if ($queued_already)
+			
+		
+		// We could get here if a message has been queued and then suspended for 
+		// re-editing. So make sure that we have not stored any data for this message
+		$query = sprintf ("select * from %s where id=%d", $msgtbl, $id);
+		$queued_already = (Sql_Num_Rows(Sql_Query($query)) > 0);
+		if ($queued_already) {
+			$query = sprintf("delete from %s where id=%d", $msgtbl, $id);
+			Sql_Query($query);
+		}
 
 		$tempfile = $this->coderoot . 'images/tempimg.tmp';
 		$limit = getConfig("ImageAttachLimit");
@@ -322,7 +341,7 @@ class inlineImagePlugin extends phplistPlugin
     		if (!$queued_already) {	// Associate the image with the message
     			$srcstr = $this->getAttribute($val, "src", 0);
     			$imgtag = str_replace($srcstr, 'src="cid:' . $cid . '"', $val);
-    			$query = sprintf("insert into %s values (%d, %d, '%s')", $msgtbl, $id, $imgid, sql_escape($imgtag));
+    			$query = sprintf("insert into %s values (%d, %d, '%s','%s')", $msgtbl, $id, $imgid, sql_escape($val), sql_escape($imgtag));
 				Sql_Query($query);
 			}
     	}
@@ -346,7 +365,7 @@ class inlineImagePlugin extends phplistPlugin
   		$msgtbl = $GLOBALS['tables']['inlineImagePlugin_msg'];
   		$imgtbl = $GLOBALS['tables']['inlineImagePlugin_image'];
   		
-		$query = sprintf('select imagetag, cid, type, file_name, local_name from %s natural join %s where id = %d', $msgtbl, $imgtbl, $this->curid);
+		$query = sprintf('select original, imagetag, cid, type, file_name, local_name from %s natural join %s where id = %d', $msgtbl, $imgtbl, $this->curid);
   		$result = Sql_Query($query);
   		$i = 0;
   		while ($row = Sql_Fetch_Assoc($result)) {
@@ -405,9 +424,9 @@ class inlineImagePlugin extends phplistPlugin
   		}
   		
   		// Replace all the image tags for inline images with tags pointing to the attached files	
-  		preg_match_all('#<img[^<>]+\Winline(?:\W.*(?:/)?)?>#Ui', $content, $match);
-    	for ($i = 0; $i < sizeof($match[0]); $i++) { // And replace them
-  				$content = str_replace($match[0][$i], $this->cache[$messageid][$i]['imagetag'], $content);
+  		$n = count($this->cache[$messageid]);
+    	for ($i = 0; $i < $n; $i++) { // And replace them
+  				$content = str_replace($this->cache[$messageid][$i]['original'], $this->cache[$messageid][$i]['imagetag'], $content);
   		}
     	return $content;
     }
