@@ -206,11 +206,6 @@ class inlineImagePlugin extends phplistPlugin
 		$msg = $messagedata['message'];
 		$id = $messagedata['id'];
 		
-		$query = sprintf ("select * from %s where id=%d", $msgtbl, $id);
-		$queued_already = (Sql_Num_Rows(Sql_Query($query)) > 0);
-		if ($queued_already)
-			
-		
 		// We could get here if a message has been queued and then suspended for 
 		// re-editing. So make sure that we have not stored any data for this message
 		$query = sprintf ("select * from %s where id=%d", $msgtbl, $id);
