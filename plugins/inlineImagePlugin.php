@@ -1,7 +1,7 @@
 <?php
 
 /**
- * inlineImage Plugin v2.0a1
+ * inlineImage Plugin v2.0a2
  * 
  * This plugin defines a placeholder that allows inline images to be inserted into
  * messages
@@ -24,7 +24,7 @@ class inlineImagePlugin extends phplistPlugin
      *  Inherited variables
      */
     public $name = 'Inline Image Plugin';
-    public $version = '2.0a1';
+    public $version = '2.0a2';
     public $enabled = false;
     public $authors = 'Arnold Lesikar';
     public $description = 'Allows the use of inline images in messages';
