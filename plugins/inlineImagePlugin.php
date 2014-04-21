@@ -269,7 +269,7 @@ class inlineImagePlugin extends phplistPlugin
 		$msgdata = loadMessageData($id);
 		$msg = $msgdata['message'];
 		
-		$query = sprintf ("select * from %s where id=%d", $msgtble, $id);
+		$query = sprintf ("select * from %s where id=%d", $msgtbl, $id);
 		$queued_already = (Sql_Num_Rows(Sql_Query($query)) > 0);	// Forwarding or requeueing
 																	// a message already sent
 		
