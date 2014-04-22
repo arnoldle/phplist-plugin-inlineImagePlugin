@@ -338,6 +338,10 @@ class inlineImagePlugin extends phplistPlugin
     			$imgtag = str_replace($srcstr, 'src="cid:' . $cid . '"', $val);
     			$query = sprintf("insert into %s values (%d, %d, '%s','%s')", $msgtbl, $id, $imgid, sql_escape($val), sql_escape($imgtag));
 				Sql_Query($query);
+				// We may have multiple copies of an image in a message. We do store those multiple
+				// copies here. That's ok because PHPmailer does not seem to want to attach more than
+				// one copy of the image to the message, even if the plugin attempts to do such 
+				// an attachment more that once. 
 			}
     	}
 	
