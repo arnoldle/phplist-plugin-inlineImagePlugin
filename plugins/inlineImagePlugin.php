@@ -361,6 +361,9 @@ class inlineImagePlugin extends phplistPlugin
   	// with inline image attachments
   	function loadImageCache($messagedata = array()) {
   		$this->curid = $messagedata['id'];
+  		$this->cache[$this->curid] = array(); 	// Make sure that the cache defined 
+  												// even if no images
+  		
   		$msgtbl = $GLOBALS['tables']['inlineImagePlugin_msg'];
   		$imgtbl = $GLOBALS['tables']['inlineImagePlugin_image'];
   		
