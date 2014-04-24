@@ -2,9 +2,25 @@
 
 /**
  * inlineImage Plugin v2.0a3
+ *
+ * @category  phplist
+ * @package   inlineImage Plugin
+ * @author    Arnold V. Lesikar
+ * @copyright 2014 Arnold V. Lesikar
+ * @license   http://www.gnu.org/licenses/gpl.html GNU General Public License, Version 3
  * 
- * This plugin defines a placeholder that allows inline images to be inserted into
- * messages
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>
  *
  * For more information about how to use this plugin, see
  * http://resources.phplist.com/plugins/inlineImage .
@@ -13,9 +29,7 @@
 
 /**
  * Registers the plugin with phplist
- * 
- * @category  phplist
- * @package   inlineImagePlugin
+ *
  */
 
 class inlineImagePlugin extends phplistPlugin
@@ -198,6 +212,10 @@ class inlineImagePlugin extends phplistPlugin
 	* called to verify that the message can be added to the queue
 	* @param array messagedata - associative array with all data for campaign
 	* @return empty string if allowed, or error string containing reason for not allowing
+	*
+	* Check that the tags for the inline images actually point to images and that
+	* the total size of the attached images is less than the limit specified for the
+	* plugin.
 	*/
 	function allowMessageToBeQueued($messagedata = array()) 
 	{
@@ -273,7 +291,8 @@ class inlineImagePlugin extends phplistPlugin
 	* @param integer id message id
 	* @return null
 	*
-	* This is where we queue the inline images associated with the message.
+	* This is where we queue the inline images associated with the message in the plugin's
+	* own database tables.
 	*/
             	
 	function messageQueued($id) {
@@ -412,6 +431,10 @@ class inlineImagePlugin extends phplistPlugin
    	* @param string  destination: destination email
    	* @param array   userdata: associative array with data about user
    	* @return string parsed content
+   	*
+   	* This is where we replace the HTML tags for the inline images with new tags pointing
+   	* to the attached image files.
+   	*
    	*/
   	function parseOutgoingHTMLMessage($messageid, $content, $destination, $userdata = null) {
   		if (!$this->processing_queue) {	// Cannot get here unless processing queue or forwarding a message
@@ -467,10 +490,12 @@ class inlineImagePlugin extends phplistPlugin
 	/**
    	* messageHeaders
    	*
-	* return headers for the message to be added, as "key => val"
-   	*
-   	* @param object $mail
+	* @param object $mail
    	* @return array (headeritem => headervalue)
+   	* 
+   	* We do not use this method primarily for creating headers. Instead we use it
+   	* for adding image attachments to the $mail object.
+   	*
    	*/
   	function messageHeaders($mail) {
   	
