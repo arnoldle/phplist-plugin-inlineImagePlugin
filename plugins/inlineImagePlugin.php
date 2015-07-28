@@ -75,7 +75,7 @@ class inlineImagePlugin extends phplistPlugin
 	private $report_flag = false; 	// Flag that mail is campaign report to admin
 	private $test_msg = false;		// Have to process test messages too
     private $cache;			// Keep inline image info while the queue is being processed
-    private $curid;			// ID of the current message being processed
+    private $curid = 0;			// ID of the current message being processed
     private $limit;			// Max total size of inline image files attached to a message
     const IMGDIRLIMIT = 10000; 	// Limiting size for image directory in kB before we clean it out
     
@@ -96,8 +96,7 @@ class inlineImagePlugin extends phplistPlugin
   	}
   	  	
   	function __construct() {
-     	$this->processing_queue = false; 
-     	$this->forwarding_message = false;   	
+    
 		$this->coderoot = dirname(__FILE__) . '/inlineImagePlugin/';
 		
 		if (!is_dir($this->coderoot))
@@ -439,15 +438,9 @@ class inlineImagePlugin extends phplistPlugin
    	*
    	*/
   	function parseOutgoingHTMLMessage($messageid, $content, $destination, $userdata = null) {
-  		if (!$this->processing_queue && !$this->test_msg ){	// Cannot get here unless processing queue  sending
+  		if (!$this->processing_queue && !$this->test_msg )	// Cannot get here unless processing queue  sending
   															// a test message or forwarding a message
   			$this->forwarding_message = true;
-  			// Have to make sure that we have cached data to deal with the message
-  			if (!$this->curid) { // We may be forwarding the message to a further address after the first
-  				$msgdata = loadMessageData ($messageid);
-  				$this->loadImageCache($msgdata);
-  			}
-  		}
   		
   		// Replace all the image tags for inline images with tags pointing to the attached files	
   		$n = count($this->cache[$messageid]);
@@ -503,6 +496,10 @@ class inlineImagePlugin extends phplistPlugin
   		logEvent($result);
   		return false;
   	}
+  	
+  	// Have to make sure that we have cached data to deal with the message
+  	// With test messages this is the only place that we can conveniently load the cache		
+  	$this->loadImageCache($msgdata);
   	$this->test_msg = true;
     return true;
   }
@@ -522,7 +519,8 @@ class inlineImagePlugin extends phplistPlugin
   		if (!$this->processing_queue && !$this->forwarding_message && !$this->test_msg) 	// Administrative message?
   			return;
   		
-  		// Don't add inline image attachments to reports or text messages	
+  		// Don't add inline image attachments to reports or text messages
+  		// $this->processing_queue does not get reset until AFTER the report is sent	
   		if ($this->report_flag || (strip_tags($mail->Body) == $mail->Body)) 	
   			return;
   		
