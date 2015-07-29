@@ -115,32 +115,7 @@ class inlineImagePlugin extends phplistPlugin
 			foreach ($files as $f)
 				unlink ($f);
 		} 
-		
-		// Clean out the temporary files in the image directory, if the size has 
-  		// gotten to be too large.
-  		$imgdir = $this->coderoot . "images/";
-  		$files = scandir($imgdir);
-  		$sum = 0;
-  		foreach ($files as $afile) 
-  			if (!is_dir($afile))
-  				$sum += filesize($afile);
-  		if ($sum >= 1000 * self::IMGDIRLIMIT) {
-  			$timestamps = array();
-  			$sizes = array();
-  			foreach ($files as $afile)
-  				if (!is_dir($afile)) {
-  					$timestamps[] = filemtime($afile);
-  					$sizes[] = filesize($afile);
-  				}
-  			array_multisort($timestamps,SORT_NUMERIC, $files, $sizes);
-  			$i = 0;
-  			while ($sum >= 500 * self::IMGDIRLIMIT) { // Empty half the directory by removing oldest files
-  				unlink($files[$i]);
-  				$sum -= $sizes[$i];
-  				$i++;
-  			}		 					
-  		}
-		    		
+				    		
 		parent::__construct();
     }
     
@@ -271,8 +246,8 @@ class inlineImagePlugin extends phplistPlugin
   	     	
   	// Set $this->curid and cache the data necessary to formulate the outgoing message
   	// with inline image attachments
-  	private function loadImageCache($messagedata = array()) {
-  		$this->curid = $messagedata['id'];
+  	private function loadImageCache($messageid) {
+  		$this->curid = $messageid;
   		$this->cache[$this->curid] = array(); 	// Make sure that the cache defined 
   												// even if no images
   		
@@ -408,7 +383,7 @@ class inlineImagePlugin extends phplistPlugin
 	*/
 
   	function campaignStarted($messagedata = array()) {
-  		$this->loadImageCache($messagedata);
+  		$this->loadImageCache($messagedata['id']);
   	} 
   	
 	/* 
@@ -441,6 +416,9 @@ class inlineImagePlugin extends phplistPlugin
   		if (!$this->processing_queue && !$this->test_msg )	// Cannot get here unless processing queue  sending
   															// a test message or forwarding a message
   			$this->forwarding_message = true;
+  			
+  		if (!isset($this->cache[$messageid]))	// May not have cached image data for a forwarded message
+  			$this->loadImageCache($messageid);
   		
   		// Replace all the image tags for inline images with tags pointing to the attached files	
   		$n = count($this->cache[$messageid]);
@@ -468,6 +446,32 @@ class inlineImagePlugin extends phplistPlugin
    	*/
   	function messageQueueFinished() {
   		$this->processing_queue = false;
+		
+		// Clean out the temporary files in the image directory, if the size has 
+  		// gotten to be too large.
+  		$imgdir = $this->coderoot . "images/";
+  		$files = scandir($imgdir);
+  		$sum = 0;
+  		foreach ($files as $afile) 
+  			if (!is_dir($afile))
+  				$sum += filesize($afile);
+  		if ($sum >= 1000 * self::IMGDIRLIMIT) {
+  			$timestamps = array();
+  			$sizes = array();
+  			foreach ($files as $afile)
+  				if (!is_dir($afile)) {
+  					$timestamps[] = filemtime($afile);
+  					$sizes[] = filesize($afile);
+  				}
+  			array_multisort($timestamps,SORT_NUMERIC, $files, $sizes);
+  			$i = 0;
+  			while ($sum >= 500 * self::IMGDIRLIMIT) { // Empty half the directory by removing oldest files
+  				unlink($files[$i]);
+  				$sum -= $sizes[$i];
+  				$i++;
+  			}		 					
+  		}
+  		
   	}
   	
   /* sendReport
@@ -498,8 +502,9 @@ class inlineImagePlugin extends phplistPlugin
   	}
   	
   	// Have to make sure that we have cached data to deal with the message
-  	// With test messages this is the only place that we can conveniently load the cache		
-  	$this->loadImageCache($msgdata);
+  	// With test messages this is the only place that we can conveniently load the cache
+  	// Note that the message data will already have been saved before sending the test.		
+  	$this->loadImageCache($messagedata['id']);
   	$this->test_msg = true;
     return true;
   }
