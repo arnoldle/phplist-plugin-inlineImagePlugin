@@ -70,6 +70,10 @@ class inlineImagePlugin extends phplistPlugin
    			 	)
    			 );
    	public $tables;
+   	
+   	/*
+     *  Private variables
+     */ 	
 	private $processing_queue = false;
 	private $forwarding_message = false;
 	private $report_flag = false; 	// Flag that mail is campaign report to admin
@@ -90,6 +94,10 @@ class inlineImagePlugin extends phplistPlugin
                   'tiff'  => 'image/tiff'
             );
     
+    /*
+     * Methods connected with instantiation
+     */
+     
     /* No longer have pages associated with this plugin! */
     function adminmenu() {
     	return array ();
@@ -146,7 +154,7 @@ class inlineImagePlugin extends phplistPlugin
 
     }
  
- /********************** UTILITY FUNCTIONS *****************************/
+ /********************** UTILITY Methods *****************************/
 
     // The value of an attribute in an inline image placeholder
     // $str is the argument searched for the attribute
@@ -228,7 +236,9 @@ class inlineImagePlugin extends phplistPlugin
 		$msgtbl = $this->tables['msg'];
 		$id = $messagedata['id'];
 		$limit = getConfig("ImageAttachLimit");
-		$query = sprintf ("select imgid, file_name, local_name, type from %s where id=%d", $msgtbl, $id);
+		// Natural join with explict 'where' clause
+		$query = sprintf("select %s.imgid, file_name, local_name, type from %s, %s where %s.imgid=%s.imgid and %s.id = %d", 
+			$imgtbl, $imgtbl, $msgtbl, $imgtbl, $msgtbl, $msgtbl, $this->curid);
 		$res = Sql_Query ($query);
 		$total = 0;
 		while ($row = Sql_Fetch_Assoc($res)) {
@@ -242,18 +252,16 @@ class inlineImagePlugin extends phplistPlugin
 		}
 		return ''; 
   	}
-  	
-  	     	
+  	 	     	
   	// Set $this->curid and cache the data necessary to formulate the outgoing message
   	// with inline image attachments
   	private function loadImageCache($messageid) {
   		$this->curid = $messageid;
   		$this->cache[$this->curid] = array(); 	// Make sure that the cache defined 
-  												// even if no images
-  		
-  		$msgtbl = $GLOBALS['tables']['inlineImagePlugin_msg'];
-  		$imgtbl = $GLOBALS['tables']['inlineImagePlugin_image'];
-  		
+  												// even if no images		
+  		$imgtbl = $this->tables['image'];
+		$msgtbl = $this->tables['msg'];
+		  		
 		$query = sprintf('select original, imagetag, cid, type, file_name, local_name from %s natural join %s where id = %d', $msgtbl, $imgtbl, $this->curid);
   		$result = Sql_Query($query);
   		$i = 0;
@@ -268,11 +276,11 @@ class inlineImagePlugin extends phplistPlugin
     			$fcontents = file_get_contents($src); 
     			if ($fcontents)
     				$this->cache[$this->curid][$i]['contents'] =$fcontents;
-    			else // Now cannot get the original file. So through away the cached data for the file
+    			else // Now cannot get the original file. So throw away the cached data for the file
     				 unset ($this->cache[$this->curid][$i]);
   			}
   			$i++;
-  		}
+  		} 
   	} 
   	
   /******************************** phpList Hooks ******************************/
@@ -291,8 +299,8 @@ class inlineImagePlugin extends phplistPlugin
    	**/
 
   	function sendMessageTabSave($id, $msgdata){
-    	$imgtbl = $this->tables['inlineImagePlugin_image'];
-		$msgtbl = $this->tables['inlineImagePlugin_msg'];
+    	$imgtbl = $this->tables['image'];
+		$msgtbl = $this->tables['msg'];
 		
 		$msg = $msgdata['message'];
 		
@@ -315,7 +323,7 @@ class inlineImagePlugin extends phplistPlugin
 		// Delete any possibly outdated data from the plugin message table
 		// Replace all of it with the current data
     	Sql_Query(sprintf ("delete from %s where id=%d", $msgtbl, $id));
-    		    		
+    		
 		//Store everything needed for rapid processing of messages
 		foreach ($match[0] as $val) {
 			$src = $this->getAttribute($val, "src");
@@ -331,11 +339,10 @@ class inlineImagePlugin extends phplistPlugin
     				$type = $this->getMimeType(pathInfo($src, PATHINFO_EXTENSION), $localfile);
     				$cid = md5(uniqid(rand(), true));
     				$query = sprintf("insert into %s (file_name, cksum, local_name, type, cid) values ('%s', '%s', '%s', '%s', '%s')", $imgtbl, sql_escape($filename), sql_escape($hsh), sql_escape($localfile), sql_escape($type), sql_escape($cid));
-    				if (Sql_Query($query)) {
-    					$query = sprintf("select imgid from %s where file_name='%s' and cksum='%s'", $imgtbl, $filename, $hsh);
-    					$row = Sql_Fetch_Row_Query($query);
-    					$imgid = $row[0];
-    				}		
+    				Sql_Query($query);
+    				$query = sprintf("select imgid from %s where file_name='%s' and cksum='%s'", $imgtbl, $filename, $hsh);
+    				$row = Sql_Fetch_Row_Query($query);
+    				$imgid = $row[0];		
     			} else if (!file_exists($row[2])) { // We've had the image before, but it has 
     												// been stored in the plugin as a temporary file
     												// which may have been deleted
@@ -343,19 +350,30 @@ class inlineImagePlugin extends phplistPlugin
     				file_put_contents($localfile, $fcontents);
     				$query = sprintf("update %s set local_name='%s' where imgid=%d", $imgtbl, $localfile, $row[0]);
     				Sql_Query($query);
-    			} // else the image file is already in the database; nothing more needed 
+    			} else {
+    				$query = sprintf("select imgid from %s where file_name='%s' and cksum='%s'", $imgtbl, $filename, $hsh);
+    				$row = Sql_Fetch_Row_Query($query);
+    				$imgid = $row[0];
+    			}
     		} else 
     			$imgid = 0; 	// Could not load image
     					
-    		// Tie latest image to the message in the plugin message table  		
+    		// Tie latest image to the message in the plugin message table    		 		
     		$srcstr = $this->getAttribute($val, "src", 0);
+    		if ($imgid) {
+    			$query = sprintf("select cid from %s where imgid=%d", $imgtbl, $imgid);
+    			Sql_Fetch_Row_Query($query);
+    			$cid = $row[0];
+    		} else
+    			$cid = '';
     		$imgtag = str_replace($srcstr, 'src="cid:' . $cid . '"', $val);
     		$query = sprintf("insert into %s values (%d, %d, '%s','%s')", $msgtbl, $id, $imgid, sql_escape($val), sql_escape($imgtag));
 			Sql_Query($query);
 			// We may have multiple copies of an image in a message. We do store those multiple
 			// copies here. That's ok because PHPmailer does not seem to want to attach more than
 			// one copy of the image to the message, even if the plugin attempts to do such 
-			// an attachment more than once. 
+			// an attachment more than once.
+			 
     	} 
 	return '';
   }
@@ -413,13 +431,13 @@ class inlineImagePlugin extends phplistPlugin
    	*
    	*/
   	function parseOutgoingHTMLMessage($messageid, $content, $destination, $userdata = null) {
-  		if (!$this->processing_queue && !$this->test_msg )	// Cannot get here unless processing queue  sending
+		if (!$this->processing_queue && !$this->test_msg )	// Cannot get here unless processing queue  sending
   															// a test message or forwarding a message
   			$this->forwarding_message = true;
   			
-  		if (!isset($this->cache[$messageid]))	// May not have cached image data for a forwarded message
+  		if ($this->forwarding_message)	// May not have cached image data for a forwarded message
   			$this->loadImageCache($messageid);
-  		
+
   		// Replace all the image tags for inline images with tags pointing to the attached files	
   		$n = count($this->cache[$messageid]);
     	for ($i = 0; $i < $n; $i++) { // And replace them
