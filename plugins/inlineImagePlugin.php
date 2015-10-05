@@ -1,7 +1,7 @@
 <?php
 
 /**
- * inlineImage Plugin v2.0a3
+ * inlineImage Plugin v2.0a4
  *
  * @category  phplist
  * @package   inlineImage Plugin
@@ -38,7 +38,7 @@ class inlineImagePlugin extends phplistPlugin
      *  Inherited variables
      */
     public $name = 'Inline Image Plugin';
-    public $version = '2.0a3';
+    public $version = '2.0a4';
     public $enabled = false;
     public $authors = 'Arnold Lesikar';
     public $description = 'Allows the use of inline images in messages';
@@ -71,10 +71,13 @@ class inlineImagePlugin extends phplistPlugin
    			 );
 	private $processing_queue = false;
 	private $forwarding_message = false;
-    private $cache;			// Keep inline image info while the queue is being processed
+	private $test_message = false;
+	private $cache;			// Keep inline image info while the queue is being processed
     private $curid;			// ID of the current message being processed
+    private $htmlemail; 	// Preference for HTML emails for user receiving current message
     private $limit;			// Max total size of inline image files attached to a message
-    private $imgdirlimit = 2000; 	// Limiting size for image directory in kB before we clean it out
+    private $imgdirlimit = 5000; 	// Limiting size for image directory in kB before we clean it out
+    private $agelimit = 2592000; 	// 30 days expressed as seconds
     
     public $image_types = array(	// Taken from class.phplistmailer.php, except don't allow Flash .swf files
                   'gif'  => 'image/gif',
@@ -94,9 +97,7 @@ class inlineImagePlugin extends phplistPlugin
   	  	
   	function __construct()
     {
-     	$this->processing_queue = false; 
-     	$this->forwarding_message = false;   	
-		$this->coderoot = dirname(__FILE__) . '/inlineImagePlugin/';
+     	$this->coderoot = dirname(__FILE__) . '/inlineImagePlugin/';
 		
 		if (!is_dir($this->coderoot))
 			mkdir ($this->coderoot);
@@ -216,6 +217,13 @@ class inlineImagePlugin extends phplistPlugin
 	* Check that the tags for the inline images actually point to images and that
 	* the total size of the attached images is less than the limit specified for the
 	* plugin.
+	*
+	* A logically better design would be to store the inline image data at the same time
+	* that the message is saved. However, editing the message may result in images being 
+	* added or removed, which would necessitate adding or removing image files from
+	* our image directory as well as updating the inline image database. All in all, it 
+	* seems to make for simpler code if we store the image data only at the time
+	* we are actually preparing to send messages.
 	*/
 	function allowMessageToBeQueued($messagedata = array()) 
 	{
@@ -227,12 +235,7 @@ class inlineImagePlugin extends phplistPlugin
 		// We could get here if a message has been queued and then suspended for 
 		// re-editing. So make sure that we have not stored any data for this message
 		$query = sprintf ("select * from %s where id=%d", $msgtbl, $id);
-		$queued_already = (Sql_Num_Rows(Sql_Query($query)) > 0);
-		if ($queued_already) {
-			$query = sprintf("delete from %s where id=%d", $msgtbl, $id);
-			Sql_Query($query);
-		}
-
+		
 		$tempfile = $this->coderoot . 'images/tempimg.tmp';
 		$limit = getConfig("ImageAttachLimit");
 		
@@ -266,14 +269,18 @@ class inlineImagePlugin extends phplistPlugin
 													// We do this only because PHP may be earlier than 5.3
 				
 				/* Is it an image file? */
-				if (!$this->getMimeType(pathinfo($src, PATHINFO_EXTENSION), $tempfile))
+				if (!$this->getMimeType(pathinfo($src, PATHINFO_EXTENSION), $tempfile)) {
+					unlink($tempfile);
 					return "The URL does not reference an image file in ". str_replace('<', '&lt;', $val);
+				}
+				unlink($tempfile);
 				$total += strlen($str);
 			}
 
 			/* Total size of the inline files must remain within limits! */
 			if ($total > 1000 * $limit)
     			return "Total size of inline images greater than the " . $limit . " kB limit";
+    		return '';
 		} else // No inline image files
 			return '';
     }
@@ -285,26 +292,14 @@ class inlineImagePlugin extends phplistPlugin
 		$tempnm .= '.' . $fparts['extension'];
 		return $tempnm;
 	}
-    	
-	/* messageQueued
-	* called when a message is placed in the queue
-	* @param integer id message id
-	* @return null
-	*
-	* This is where we queue the inline images associated with the message in the plugin's
-	* own database tables.
-	*/
-            	
-	function messageQueued($id) {
+	
+	private function saveImageData ($msgdata = array()) {
 		$imgtbl = $GLOBALS['tables']['inlineImagePlugin_image'];
 		$msgtbl = $GLOBALS['tables']['inlineImagePlugin_msg'];
 		
-		$msgdata = loadMessageData($id);
+		$id = $msgdata ['id'];
 		$msg = $msgdata['message'];
-		
 		$query = sprintf ("select * from %s where id=%d", $msgtbl, $id);
-		$queued_already = (Sql_Num_Rows(Sql_Query($query)) > 0);	// Forwarding or requeueing
-																	// a message already sent
 		
 		// Merge the message and template to check the images
 		// Make sure that we have all parts of the message that may contain images
@@ -319,6 +314,15 @@ class inlineImagePlugin extends phplistPlugin
 		else									// Phplist always adds a footer.
     		$msg .= $msgdata["footer"]; 	// We're not constructing the message, just collecting inline image files
 		
+		// Remove old data connecting this message with its images.We save the new data 
+		// below. We don't bother clearing old images from the 
+		// directory here, because they will eventually be deleted anyway, as we clean
+		// older files from the database
+		if (Sql_Num_Rows(Sql_Query($query)) > 0) {
+			$query = sprintf("delete from %s where id=%d", $msgtbl, $id);
+			Sql_Query($query);
+		}
+
 		// Collect the inline image tags
     	preg_match_all('#<img[^<>]+\Winline(?:\W.*(?:/)?)?>#Ui', $msg, $match);
 
@@ -331,54 +335,71 @@ class inlineImagePlugin extends phplistPlugin
     		$query = sprintf("select imgid, cid, local_name from %s where file_name='%s' and cksum='%s'", $imgtbl, $filename, $hsh);
     		if (!($row = Sql_Fetch_Row_Query($query))) {
     			$localfile = $this->getTempFilename($filename);	// File name in image directory
-    			file_put_contents($localfile, $fcontents);
+				file_put_contents($localfile, $fcontents);
     			$type = $this->getMimeType(pathInfo($src, PATHINFO_EXTENSION), $localfile);
     			$cid = md5(uniqid(rand(), true));
-    			$query = sprintf("insert into %s (file_name, cksum, local_name, type, cid) values ('%s', '%s', '%s', '%s', '%s')", $imgtbl, sql_escape($filename), sql_escape($hsh), sql_escape($localfile), sql_escape($type), sql_escape($cid));
-    			if (Sql_Query($query)) {
-    				$query = sprintf("select imgid from %s where file_name='%s' and cksum='%s'", $imgtbl, $filename, $hsh);
-    				$row = Sql_Fetch_Row_Query($query);
-    				$imgid = $row[0];
-    			}		
+    			$query_i = sprintf("insert into %s (file_name, cksum, local_name, type, cid) values ('%s', '%s', '%s', '%s', '%s')", $imgtbl, sql_escape($filename), sql_escape($hsh), sql_escape($localfile), sql_escape($type), sql_escape($cid));
+    			Sql_Query($query_i);
+    			$row = Sql_Fetch_Row_Query($query);	
     		} else if (!file_exists($row[2])) { // We've had the image before, but it has 
     											// been stored in the plugin only as a temporary file
     											// which may have been deleted
     			$localfile = $this->getTempFilename($filename);
     			file_put_contents($localfile, $fcontents);
-    			$query = sprintf("update %s set local_name='%s' where imgid=%d", $imgtbl, $localfile, $row[0]);
-    			Sql_Query($query);
+    			$query_u = sprintf("update %s set local_name='%s' where imgid=%d", $imgtbl, $localfile, $row[0]);
+    			Sql_Query($query_u);
+    			$row = Sql_Fetch_Row_Query($query);
     		} else {	// The image exists in the image directory
-    			$imgid = $row[0];
-    			$cid = $row[1];
+    			touch($row[2]);	// Flag that image file was recently used
     		}
-    		
-    		if (!$queued_already) {	// Associate the image with the message
-    			$srcstr = $this->getAttribute($val, "src", 0);
-    			$imgtag = str_replace($srcstr, 'src="cid:' . $cid . '"', $val);
-    			$query = sprintf("insert into %s values (%d, %d, '%s','%s')", $msgtbl, $id, $imgid, sql_escape($val), sql_escape($imgtag));
-				Sql_Query($query);
-				// We may have multiple copies of an image in a message. We do store those multiple
-				// copies here. That's ok because PHPmailer does not seem to want to attach more than
-				// one copy of the image to the message, even if the plugin attempts to do such 
-				// an attachment more that once. 
-			}
+				
+    		// Associate the image with the message 
+    		// Any previous entries for this message ID have been deleted when we test
+    		// if a test message is OK or when we check if the message can be queued.
+			$srcstr = $this->getAttribute($val, "src", 0);
+    		$imgtag = str_replace($srcstr, 'src="cid:' . $row[1] . '"', $val);
+	   		$query_m = sprintf("insert into %s values (%d, %d, '%s','%s')", $msgtbl, $id, $row[0], sql_escape($val), sql_escape($imgtag));
+			Sql_Query($query_m);
     	}
-	
   	} 
-  	
-  	/* messageReQueued
-  	* called when a message is placed back in the queue
-	* @param integer id message id
-   	* @return null
-   	*/
 
-  	function messageReQueued($id) {
-  		$this->messageQueued($id);	// We don't care whether the message has been sent before
-  	}
+	
+  /* sendtestAllowed 
+   * called when trying to send a test email
+   * return false is sending a test email is not allowed
+   * @param array messagedata 
+   * @return bool;
+   */
+  function sendTestAllowed($messagedata) {
+  	$result = $this->allowMessageToBeQueued($messagedata);
+  	if ($result) {
+  		logEvent($result);
+  		return false;
+  	} 
+  	$this->test_message = true;
+  	$this->saveImageData($messagedata);
+  	$this->loadImageCache($messagedata);
+    return true;
+  }
+  
+ 	/* messageQueued
+	* called when a message is placed in the queue
+	* @param integer id message id
+	* @return null
+	*
+	* This is where we queue the inline images associated with the message in the plugin's
+	* own database tables.
+	*/
+            	
+	function messageQueued($id) {
+		$msgdata = loadMessageData($id);
+		$this->saveImageData ($msgdata);
+	} 
   	
   	// Set $this->curid and cache the data necessary to formulate the outgoing message
   	// with inline image attachments
   	function loadImageCache($messagedata = array()) {
+
   		$this->curid = $messagedata['id'];
   		$this->cache[$this->curid] = array(); 	// Make sure that the cache defined 
   												// even if no images
@@ -437,7 +458,7 @@ class inlineImagePlugin extends phplistPlugin
    	*
    	*/
   	function parseOutgoingHTMLMessage($messageid, $content, $destination, $userdata = null) {
-  		if (!$this->processing_queue) {	// Cannot get here unless processing queue or forwarding a message
+  		if ((!$this->processing_queue) && (!$this->test_message)){	// Cannot get here unless processing queue, sending a test message or forwarding a message
   			$this->forwarding_message = true;
   			// Have to make sure that we have cached data to deal with the message
   			if (!$this->curid) { // We may be forwarding the message to a further address after the first
@@ -464,6 +485,7 @@ class inlineImagePlugin extends phplistPlugin
   	function processQueueStart() {
   		$this->processing_queue = true;
   		$this->forwarding_message = false;
+  		$this->test_message = false;
   	}
   	
   	/* messageQueueFinished
@@ -472,6 +494,8 @@ class inlineImagePlugin extends phplistPlugin
    	*/
   	function messageQueueFinished() {
   		$this->processing_queue = false;
+  		$this->forwarding_message = false;
+  		$this->test_message = false;
   		
   		// Clean out the temporary files in the image directory, if the size has 
   		// gotten to be too large.
@@ -481,12 +505,31 @@ class inlineImagePlugin extends phplistPlugin
   		foreach ($files as $afile) 
   			if (!is_dir($afile))
   				$sum += filesize($afile);
-  		if ($sum >= 1000 * $this->imgdirlimit)
-  			foreach ($files as $afile)
-  				if (!is_dir($afile))
-  					unlink ($afile);
+  		if ($sum >= 1000 * $this->imgdirlimit) {
+  			$timestamps = array();
+  			$sizes = array();
+  			foreach ($files as $afile) {
+  				if (!is_dir($afile)) {
+  					$timestamps[] = filemtime($afile);
+  					$sizes[] = filesize($afile);
+  				}
+  			}
+  			array_multisort($timestamps, SORT_ASC, SORT_NUMERIC, $files, $sizes);
+  			$i = 0;
+  			while ($sum >= 500 * $this->imgdirlimit) { // Empty half the directory by removing oldest files
+  				unlink($files[$i]);
+  				$sum -= $sizes[$i];
+  				$i++;
+  			}
+  			// Remove any remaining files older than the age limit
+  			$limit = time () - $this->agelimit;
+  			while ($timestamps[$i] < $limit) {
+  				unlink($files[i]);
+  				$i++;
+  			}		 					
+  		}
   	}
-
+  	
 	/**
    	* messageHeaders
    	*
@@ -498,8 +541,14 @@ class inlineImagePlugin extends phplistPlugin
    	*
    	*/
   	function messageHeaders($mail) {
-  	
-  		if ((!$this->processing_queue) && (!$this->forwarding_message)) 	// Administrative message?
+  	 
+  	 	if ($mail->ContentType =='text/plain') // No images to attach
+  	 		return;
+  	 		
+  		// Note that system messages are sent by another route and won't get here
+  		// Condition above should cover every case. Here we try to cover cases
+  		// we did not think of
+  		if ((!$this->processing_queue) && (!$this->forwarding_message) && (!$this->test_message))
   			return;
   		
   		$imgs = $this->cache[$this->curid];
