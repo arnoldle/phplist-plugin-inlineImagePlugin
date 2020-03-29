@@ -556,11 +556,11 @@ class inlineImagePlugin extends phplistPlugin
   		
   			// Borrowed from the add_html_image() method of the PHPlistMailer class
   			if (method_exists($mail,'AddEmbeddedImageString')) {
-        		$mail->AddEmbeddedImageString($imgs[$i]['contents'], $imgs[$i]['cid'], $imgs[$i]['file_name'], $mail->encoding, $imgs[$i]['type']);
+        		$mail->AddEmbeddedImageString($imgs[$i]['contents'], $imgs[$i]['cid'], $imgs[$i]['file_name'], 'base64', $imgs[$i]['type']);
       		} elseif (method_exists($mail,'AddStringEmbeddedImage')) {
         	## PHPMailer 5.2.5 and up renamed the method
         	## https://github.com/Synchro/PHPMailer/issues/42#issuecomment-16217354
-        		$mail->AddStringEmbeddedImage($imgs[$i]['contents'], $imgs[$i]['cid'], $imgs[$i]['file_name'], $mail->encoding, $imgs[$i]['type']);
+        		$mail->AddStringEmbeddedImage($imgs[$i]['contents'], $imgs[$i]['cid'], $imgs[$i]['file_name'], 'base64', $imgs[$i]['type']);
       		} elseif (isset($mail->attachment) && is_array($mail->attachment)) {
         	// Append to $attachment array
         		$cur = count($mail->attachment);
