@@ -297,7 +297,16 @@ class inlineImagePlugin extends phplistPlugin
 		
 		$id = $msgdata ['id'];
 		$msg = $msgdata['message'];
-		$query = sprintf ("select * from %s where id=%d", $msgtbl, $id);
+		$query = sprintf ("select imgid from %s where id=%d", $msgtbl, $id);
+		
+		// Remove old data connecting this message with its images.We save the new data 
+		// below. We don't bother clearing old images from the 
+		// directory here, because they will eventually be deleted anyway, as we clean
+		// older files from the database
+		if (Sql_Num_Rows(Sql_Query($query)) > 0) {
+			$query = sprintf("delete from %s where id=%d", $msgtbl, $id);
+			Sql_Query($query);
+		}
 		
 		// Merge the message and template to check the images
 		// Make sure that we have all parts of the message that may contain images
@@ -310,16 +319,7 @@ class inlineImagePlugin extends phplistPlugin
     	if (strpos($msg, "[FOOTER]") !== false)
     		$msg = str_ireplace("[FOOTER]", $msgdata["footer"],$msg);
 		else									// Phplist always adds a footer.
-    		$msg .= $msgdata["footer"]; 	// We're not constructing the message, just collecting inline image files
-		
-		// Remove old data connecting this message with its images.We save the new data 
-		// below. We don't bother clearing old images from the 
-		// directory here, because they will eventually be deleted anyway, as we clean
-		// older files from the database
-		if (Sql_Num_Rows(Sql_Query($query)) > 0) {
-			$query = sprintf("delete from %s where id=%d", $msgtbl, $id);
-			Sql_Query($query);
-		}
+    		$msg .= $msgdata["footer"]; 	// We're not constructing the message, just collecting inline image files				
 
 		// Collect the inline image tags
     	preg_match_all('#<img[^<>]+\Winline(?:\W.*(?:/)?)?>#Ui', $msg, $match);
