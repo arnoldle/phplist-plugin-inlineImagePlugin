@@ -47,15 +47,17 @@ class inlineImagePlugin extends phplistPlugin
     			"imgid" => array("integer not null primary key auto_increment","Image numerical ID"),
     			"file_name" => array("varchar(255) not null","File name including extension"),
     			"cksum" => array ("varchar(45) not null", "sha1 checksum for the file contents"),
-				'local_name' => array("varchar(255) not null","A unique local file name including extension"),
-				"type" => array("char(50)", "MIME type of the image"),
-				"cid" => array("char(32) not null","MIME content ID")
+			'local_name' => array("varchar(255) not null","A unique local file name including extension"),
+			"type" => array("char(50)", "MIME type of the image"),
+			"cid" => array("char(32) not null","MIME content ID")
 			),
 			'msg' => array(
-				"id" => array("integer not null", "Message ID"),
-				"imgid" => array("integer not null","Image numerical ID"),
+				"id" => array("integer unsigned not null default 0", "Message ID"),
+				"imgid" => array("integer unsigned not null default 0","Image numerical ID"),
 				"original" => array ("Text", "Original HTML image tag"),
-				"imagetag" => array("Text", "HTML image tag with attributes and cid")
+				"imagetag" => array("Text", "HTML image tag with attributes and cid"),
+				'primary key' => array('(id,imgid)', ''),
+				'index_1' => array('imgid(imgid)',''),
 			)
 		);  				// Structure of database tables for this plugin
 	public $settings = array(
@@ -230,11 +232,7 @@ class inlineImagePlugin extends phplistPlugin
 		$msgtbl = $GLOBALS['tables']['inlineImagePlugin_msg'];
 		
 		$msg = $messagedata['message'];
-		$id = $messagedata['id'];
-		
-		// We could get here if a message has been queued and then suspended for 
-		// re-editing. So make sure that we have not stored any data for this message
-		$query = sprintf ("select * from %s where id=%d", $msgtbl, $id);
+		$id = $messagedata['id'];		
 		
 		$tempfile = $this->coderoot . 'images/tempimg.tmp';
 		$limit = getConfig("ImageAttachLimit");
@@ -299,7 +297,16 @@ class inlineImagePlugin extends phplistPlugin
 		
 		$id = $msgdata ['id'];
 		$msg = $msgdata['message'];
-		$query = sprintf ("select * from %s where id=%d", $msgtbl, $id);
+		$query = sprintf ("select imgid from %s where id=%d", $msgtbl, $id);
+		
+		// Remove old data connecting this message with its images.We save the new data 
+		// below. We don't bother clearing old images from the 
+		// directory here, because they will eventually be deleted anyway, as we clean
+		// older files from the database
+		if (Sql_Num_Rows(Sql_Query($query)) > 0) {
+			$query = sprintf("delete from %s where id=%d", $msgtbl, $id);
+			Sql_Query($query);
+		}
 		
 		// Merge the message and template to check the images
 		// Make sure that we have all parts of the message that may contain images
@@ -312,16 +319,7 @@ class inlineImagePlugin extends phplistPlugin
     	if (strpos($msg, "[FOOTER]") !== false)
     		$msg = str_ireplace("[FOOTER]", $msgdata["footer"],$msg);
 		else									// Phplist always adds a footer.
-    		$msg .= $msgdata["footer"]; 	// We're not constructing the message, just collecting inline image files
-		
-		// Remove old data connecting this message with its images.We save the new data 
-		// below. We don't bother clearing old images from the 
-		// directory here, because they will eventually be deleted anyway, as we clean
-		// older files from the database
-		if (Sql_Num_Rows(Sql_Query($query)) > 0) {
-			$query = sprintf("delete from %s where id=%d", $msgtbl, $id);
-			Sql_Query($query);
-		}
+    		$msg .= $msgdata["footer"]; 	// We're not constructing the message, just collecting inline image files				
 
 		// Collect the inline image tags
     	preg_match_all('#<img[^<>]+\Winline(?:\W.*(?:/)?)?>#Ui', $msg, $match);
