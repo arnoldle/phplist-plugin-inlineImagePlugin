@@ -232,11 +232,7 @@ class inlineImagePlugin extends phplistPlugin
 		$msgtbl = $GLOBALS['tables']['inlineImagePlugin_msg'];
 		
 		$msg = $messagedata['message'];
-		$id = $messagedata['id'];
-		
-		// We could get here if a message has been queued and then suspended for 
-		// re-editing. So make sure that we have not stored any data for this message
-		$query = sprintf ("select * from %s where id=%d", $msgtbl, $id);
+		$id = $messagedata['id'];		
 		
 		$tempfile = $this->coderoot . 'images/tempimg.tmp';
 		$limit = getConfig("ImageAttachLimit");
