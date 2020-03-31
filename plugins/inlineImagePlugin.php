@@ -47,15 +47,17 @@ class inlineImagePlugin extends phplistPlugin
     			"imgid" => array("integer not null primary key auto_increment","Image numerical ID"),
     			"file_name" => array("varchar(255) not null","File name including extension"),
     			"cksum" => array ("varchar(45) not null", "sha1 checksum for the file contents"),
-				'local_name' => array("varchar(255) not null","A unique local file name including extension"),
-				"type" => array("char(50)", "MIME type of the image"),
-				"cid" => array("char(32) not null","MIME content ID")
+			'local_name' => array("varchar(255) not null","A unique local file name including extension"),
+			"type" => array("char(50)", "MIME type of the image"),
+			"cid" => array("char(32) not null","MIME content ID")
 			),
 			'msg' => array(
-				"id" => array("integer not null", "Message ID"),
-				"imgid" => array("integer not null","Image numerical ID"),
+				"id" => array("integer unsigned not null default 0", "Message ID"),
+				"imgid" => array("integer unsigned not null default 0","Image numerical ID"),
 				"original" => array ("Text", "Original HTML image tag"),
-				"imagetag" => array("Text", "HTML image tag with attributes and cid")
+				"imagetag" => array("Text", "HTML image tag with attributes and cid"),
+				'primary key' => array('(id,imgid)', ''),
+				'index_1' => array('imgid(imgid)',''),
 			)
 		);  				// Structure of database tables for this plugin
 	public $settings = array(
